@@ -1,0 +1,8 @@
+cdsapi
+duckdb
+xarray
+netcdf4
+h5netcdf
+h5py
+cfgrib
+eccodes
