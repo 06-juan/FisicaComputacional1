@@ -1,15 +1,13 @@
 import cdsapi
 import xarray as xr
-import pandas as pd
 import zipfile
 import shutil
 import duckdb
+import glob
 import os
 
 # Rutas
 RAW_PATH = 'data/raw/'
-FILE_PRESSURE = os.path.join(RAW_PATH, 'pressure_levels_raw.nc')
-FILE_LAND = os.path.join(RAW_PATH, 'era5_land_raw.nc')
 
 def preparar_entorno():
     os.makedirs(RAW_PATH, exist_ok=True)
@@ -17,100 +15,121 @@ def preparar_entorno():
 def descargar_datos():
     c = cdsapi.Client()
     area = [5.6, -76.1, 4.0, -75.2]
-    # Bajamos solo 2024 y 2025 para asegurar éxito
-    anios = [str(year) for year in range(2000, 2025)]
+    
+    # Colombia es UTC-5. 
+    # Para tener 00:00 local -> Pedimos 05:00 UTC
+    # Para tener 12:00 local -> Pedimos 17:00 UTC
+    horas_utc = ['05:00', '17:00']
+
+    anios = range(2024, 2026)
     meses = [f"{m:02d}" for m in range(1, 13)]
-    dias  = [f"{m:02d}" for m in range(1, 2)] # 1 dia para evitar error: Your request is too large, please reduce your selection.
-                                              # podria hacerse en varias consultas pequeñas
-
-    print("--- Descargando Pressure Levels ---")
-    c.retrieve('reanalysis-era5-pressure-levels', {
-        'variable': ['temperature', 'u_component_of_wind', 'v_component_of_wind'],
-        'pressure_level': '1000',
-        'product_type': 'reanalysis',
-        'year': anios,
-        'month': meses,
-        'day': dias,
-        'time': '12:00',
-        'area': area,
-        'format': 'netcdf',
-    }, FILE_PRESSURE)
-
-    print("--- Descargando ERA5-Land ---")
-    c.retrieve('reanalysis-era5-land', {
-        'variable': ['2m_temperature', 'surface_pressure', 'total_precipitation'],
-        'year': anios,
-        'month': meses,
-        'day': dias,
-        'time': '12:00',
-        'area': area,
-        'format': 'netcdf',
-    }, FILE_LAND)
-
-def descomprimir_si_zip(filepath):
-    """Si el archivo es un ZIP, extrae el .nc que contiene y lo reemplaza."""
-    with open(filepath, 'rb') as f:
-        magic = f.read(4)
+    dias =  [f"{d:02d}" for d in range(1, 32)]
+    bloques = [anios[i:i+2] for i in range(0, len(anios), 2)]
     
-    if magic == b'PK\x03\x04':  # Firma ZIP
-        print(f"  {os.path.basename(filepath)} es un ZIP — descomprimiendo...")
-        extract_dir = filepath + '_unzipped'
-        with zipfile.ZipFile(filepath, 'r') as z:
-            z.extractall(extract_dir)
-        
-        # Busca el primer .nc dentro
-        nc_files = [f for f in os.listdir(extract_dir) if f.endswith('.nc')]
-        if not nc_files:
-            raise FileNotFoundError(f"No se encontró ningún .nc dentro del ZIP: {filepath}")
-        
-        nc_inside = os.path.join(extract_dir, nc_files[0])
-        shutil.move(nc_inside, filepath)
-        shutil.rmtree(extract_dir)                # Limpia carpeta temporal
-        print(f"  Extraído: {nc_files[0]}")
+    for bloque in bloques:
+        anios_str = [str(a) for a in bloque]
+        nombre_p = os.path.join(RAW_PATH, f'pressure_{anios_str[0]}_{anios_str[-1]}.nc')
+        nombre_l = os.path.join(RAW_PATH, f'land_{anios_str[0]}_{anios_str[-1]}.nc')
 
-def detectar_engine(filepath):
-    with open(filepath, 'rb') as f:
-        magic = f.read(8)
+        if os.path.exists(nombre_p) and os.path.exists(nombre_l):
+            print(f"⏩ Saltando bloque {anios_str[0]}-{anios_str[-1]} (ya descargado).")
+            continue
+        
+        print(f"--- Descargando bloque: {anios_str[0]}-{anios_str[-1]} ---")
+        c.retrieve('reanalysis-era5-pressure-levels', {
+            'variable': ['temperature', 'u_component_of_wind', 'v_component_of_wind'],
+            'pressure_level': '1000',
+            'product_type': 'reanalysis',
+            'year': anios_str,
+            'month': meses,
+            'day': dias,
+            'time': horas_utc,
+            'area': area,
+            'format': 'netcdf',
+        }, nombre_p)
+
+        print("--- Descargando ERA5-Land ---")
+        c.retrieve('reanalysis-era5-land', {
+            'variable': ['2m_temperature', 'surface_pressure', 'total_precipitation'],
+            'year': anios_str,
+            'month': meses,
+            'day': dias,
+            'time': horas_utc,
+            'area': area,
+            'format': 'netcdf'
+        }, nombre_l)
     
-    if magic[:4] == b'\x89HDF':
-        return 'h5netcdf'
-    elif magic[:3] == b'CDF':
-        return 'scipy'
-    elif magic[:4] == b'GRIB':
-        return 'cfgrib'
-    else:
-        return 'h5netcdf'
+def descomprimir_todos_los_zips():
+    """Busca archivos .nc que en realidad son ZIP y los extrae."""
+    zips = glob.glob(os.path.join(RAW_PATH, "*.nc")) + glob.glob(os.path.join(RAW_PATH, "*.zip"))
+    
+    for filepath in zips:
+        try:
+            with open(filepath, 'rb') as f:
+                magic = f.read(4)
+            
+            if magic == b'PK\x03\x04':  # Firma estándar de un archivo ZIP
+                print(f"📦 Descomprimiendo: {os.path.basename(filepath)}...")
+                extract_dir = filepath + "_tmp"
+                with zipfile.ZipFile(filepath, 'r') as z:
+                    z.extractall(extract_dir)
+                
+                # Buscamos el archivo .nc real que estaba dentro
+                nc_internos = glob.glob(os.path.join(extract_dir, "*.nc"))
+                if nc_internos:
+                    # Sobrescribimos el original con el contenido real
+                    shutil.move(nc_internos[0], filepath)
+                    print(f"   ✅ Extraído con éxito.")
+                
+                shutil.rmtree(extract_dir)
+        except Exception as e:
+            print(f"   ⚠️ No se pudo procesar como ZIP: {filepath} ({e})")
 
 def consolidar_a_bronze_parquet():
-    print("Consolidando NetCDF a Parquet (Capa Bronze)...")
+    print("\n--- Iniciando Consolidación Capa Bronze ---")
+    os.makedirs(RAW_PATH, exist_ok=True)
+    
+    # 1. Limpieza previa de archivos ZIP
+    descomprimir_todos_los_zips()
+
     try:
-        # Descomprimir si vienen como ZIP
-        descomprimir_si_zip(FILE_PRESSURE)
-        descomprimir_si_zip(FILE_LAND)
+        # 2. Identificar todos los fragmentos (bloques de años)
+        # Suponiendo que tus archivos se llaman 'pressure_2000_2005.nc', etc.
+        files_p = glob.glob(os.path.join(RAW_PATH, "pressure_*.nc"))
+        files_l = glob.glob(os.path.join(RAW_PATH, "land_*.nc"))
 
-        engine1 = detectar_engine(FILE_PRESSURE)
-        engine2 = detectar_engine(FILE_LAND)
-        print(f"  pressure → engine: {engine1}")
-        print(f"  land     → engine: {engine2}")
+        if not files_p or not files_l:
+            raise FileNotFoundError("No se encontraron archivos .nc para consolidar.")
 
-        # 1. Abrir con Xarray (usando los motores que ya probamos)
-        ds_p = xr.open_dataset(FILE_PRESSURE, engine=engine1).squeeze()
-        ds_l = xr.open_dataset(FILE_LAND, engine=engine2,).squeeze()
+        print(f"📂 Fragmentos encontrados: {len(files_p)} de Pressure, {len(files_l)} de Land.")
 
-        print("Archivos abiertos. Transformando a DataFrame...")
+        # 3. Carga Multi-Archivo con Xarray
+        # 'combine=by_coords' une los años automáticamente siguiendo la línea de tiempo
+        print("🔗 Uniendo fragmentos temporales...")
+        ds_p = xr.open_mfdataset(files_p, combine='by_coords', engine='h5netcdf').squeeze()
+        ds_l = xr.open_mfdataset(files_l, combine='by_coords', engine='h5netcdf').squeeze()
 
-        # 2. Convertir a DataFrames (paso intermedio en memoria)
+        # 4. Transformación a DataFrame
+        print("🚀 Convirtiendo a DataFrames (esto puede tardar según el volumen)...")
         df_p = ds_p.to_dataframe().reset_index()
         df_l = ds_l.to_dataframe().reset_index()
 
-        # 3. Usar DuckDB para guardar como Parquet (altamente comprimido)
+        # 5. Volcado a Parquet usando DuckDB (Máxima compresión y velocidad)
         con = duckdb.connect()
-        con.execute(f"COPY df_p TO '{os.path.join(RAW_PATH, 'pressure.parquet')}' (FORMAT PARQUET)")
-        con.execute(f"COPY df_l TO '{os.path.join(RAW_PATH, 'land.parquet')}' (FORMAT PARQUET)")
-        
-        print("Capa Bronze lista en formato Parquet.")
+        path_p = os.path.join(RAW_PATH, 'pressure_bronze.parquet')
+        path_l = os.path.join(RAW_PATH, 'land_bronze.parquet')
+
+        print("💾 Guardando en formato Parquet...")
+        con.execute(f"COPY df_p TO '{path_p}' (FORMAT PARQUET)")
+        con.execute(f"COPY df_l TO '{path_l}' (FORMAT PARQUET)")
+
+        print(f"\n--- REPORTE BRONZE ---")
+        print(f"✅ Pressure Bronze: {len(df_p)} registros")
+        print(f"✅ Land Bronze: {len(df_l)} registros")
+        print(f"📍 Archivos listos en: {RAW_PATH}")
+
     except Exception as e:
-        print(f"Error en Ingest: {e}")
+        print(f"❌ Error crítico en la consolidación: {e}")
 
 def procesar_raw():
     preparar_entorno()

@@ -4,35 +4,31 @@ import os
 SILVER_PATH = 'data/silver/'
 os.makedirs(SILVER_PATH, exist_ok=True)
 
-RAW_PRESSURE = 'data/raw/pressure.parquet'
-RAW_LAND = 'data/raw/land.parquet'
+RAW_PRESSURE = 'data/raw/pressure_bronze.parquet'
+RAW_LAND = 'data/raw/land_bronze.parquet'
 OUTPUT_SILVER = os.path.join(SILVER_PATH, 'clima_eje_cafetero_silver.parquet')
 
 def procesar_silver():
     con = duckdb.connect()
     
     query = f"""WITH clean_land AS (
-                    SELECT 
-                        src.valid_time AS time,
-                        src.latitude,
-                        src.longitude,
-                        src.t2m,
-                        src.sp,
-                        src.tp
-                    FROM '{RAW_LAND}' AS src
+                SELECT 
+                    (valid_time - INTERVAL 5 HOURS) AS hora_local,
+                    ROUND(latitude, 1) as lat_join, -- Redondeamos a 0.1 grados
+                    ROUND(longitude, 1) as lon_join,
+                    latitude, longitude, t2m, sp, tp
+                FROM '{RAW_LAND}'
                 ),
                 clean_pressure AS (
                     SELECT 
-                        src.valid_time AS time,
-                        src.latitude,
-                        src.longitude,
-                        src.t,
-                        src.u,
-                        src.v
-                    FROM '{RAW_PRESSURE}' AS src
+                        (valid_time - INTERVAL 5 HOURS) AS hora_local,
+                        ROUND(latitude, 1) as lat_join,
+                        ROUND(longitude, 1) as lon_join,
+                        t, u, v
+                    FROM '{RAW_PRESSURE}'
                 )
                 SELECT 
-                    l.time,
+                    l.hora_local,
                     l.latitude,
                     l.longitude,
                     ROUND(l.t2m - 273.15, 2)                              AS temp_c,
@@ -40,18 +36,18 @@ def procesar_silver():
                     ROUND(SQRT(p.u * p.u + p.v * p.v), 2)                AS w_speed_ms,
                     ROUND((ATAN2(p.u, p.v) * 180.0 / PI() + 180) % 360, 1) AS w_dir_deg,
                     ROUND(l.tp * 1000.0, 4)                               AS rain_mm
-                FROM clean_land l
+                FROM clean_land l 
                 INNER JOIN clean_pressure p 
-                    ON  l.time      = p.time 
-                    AND l.latitude  = p.latitude 
-                    AND l.longitude = p.longitude
+                    ON  l.hora_local = p.hora_local 
+                    AND ABS(l.lat_join - p.lat_join) < 0.01 
+                    AND ABS(l.lon_join - p.lon_join) < 0.01
                 """
     
     print("Ejecutando transformaciones Silver con DuckDB...")
     con.execute(f"COPY ({query}) TO '{OUTPUT_SILVER}' (FORMAT PARQUET)")
     
     print(f"¡Capa Silver creada con éxito!")
-    print(con.execute(f"SELECT * FROM '{OUTPUT_SILVER}' LIMIT 5").df())
+    print(con.execute(f"SELECT * FROM '{OUTPUT_SILVER}' ORDER BY latitude ASC LIMIT 5").df())
 
 if __name__ == "__main__":
     procesar_silver()
