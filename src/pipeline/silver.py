@@ -49,5 +49,34 @@ def procesar_silver():
     print(f"¡Capa Silver creada con éxito!")
     print(con.execute(f"SELECT * FROM '{OUTPUT_SILVER}' ORDER BY latitude ASC LIMIT 5").df())
 
+#-- sanity check
+
+def sanity_checks():
+
+    con = duckdb.connect()
+
+    print(con.execute("""SELECT 
+            CAST(hora_local AS DATE) AS fecha,
+            latitude,
+            longitude,
+            COUNT(*) AS conteo_horas,
+            -- Esto nos dirá qué horas tenemos realmente en ese grupo
+            list(strftime(hora_local, '%H:%M')) AS horas_presentes
+        FROM 'data/silver/clima_eje_cafetero_silver.parquet'
+        GROUP BY 1, 2, 3
+        HAVING conteo_horas < 2  -- Solo muéstrame los que están incompletos
+        ORDER BY fecha ASC;SELECT 
+            CAST(hora_local AS DATE) AS fecha,
+            latitude,
+            longitude,
+            COUNT(*) AS conteo_horas,
+            -- Esto nos dirá qué horas tenemos realmente en ese grupo
+            list(strftime(hora_local, '%H:%M')) AS horas_presentes
+        FROM 'data/silver/clima_eje_cafetero_silver.parquet'
+        GROUP BY 1, 2, 3
+        HAVING conteo_horas < 2  -- Solo muéstrame los que están incompletos
+        ORDER BY fecha ASC;""").df())
+
 if __name__ == "__main__":
     procesar_silver()
+    sanity_checks()

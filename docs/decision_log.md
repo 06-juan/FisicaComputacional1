@@ -2,6 +2,7 @@
 
 Este documento registra las decisiones críticas tomadas durante el desarrollo del pipeline de datos (Arquitectura Medallion), su justificación física y técnica, y las soluciones a los cuellos de botella encontrados.
 
+# 28/03/2026 Juan  Jose
 ---
 
 ## 1. Gestión de Ingesta: Descarga por Lotes (Batching)
@@ -45,3 +46,11 @@ Este documento registra las decisiones críticas tomadas durante el desarrollo d
 
 **Estado del Proyecto:** Capa Silver estable y normalizada.
 **Próximo Hito:** Generación de KPIs mensuales de anomalías térmicas en Capa Gold.
+
+
+## 5. Correccion de anomalias: 
+**Problema:** Se detectaron anomalías en los límites temporales del dataset (primer y último día) debido al desfase de zona horaria (UTC-5). Para evitar sesgos en el cálculo de la amplitud térmica.
+
+**Decisión:** se implementó una regla de integridad en la capa Gold que descarta cualquier unidad espacial-temporal que no cuente con el par de mediciones día/noche (00h y 12h local).
+
+**Justificación:** ($\Delta T = 0$ por falta de muestras), 

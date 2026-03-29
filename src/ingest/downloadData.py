@@ -1,140 +1,266 @@
-import cdsapi
-import xarray as xr
-import zipfile
-import shutil
-import duckdb
-import glob
-import os
+# src/ingest/downloadData.py
+"""
+Capa RAW — Descarga ERA5-Land via Google Earth Engine
+Pipeline: GEE → Google Drive → data/raw/*.csv → data/raw/raw.parquet
 
-# Rutas
-RAW_PATH = 'data/raw/'
+Prerequisitos (una sola vez):
+    pip install earthengine-api geemap duckdb pandas
+    earthengine authenticate
+"""
+
+import ee
+import os
+import time
+import glob
+import duckdb
+import pandas as pd
+
+# ─────────────────────────────────────────
+#  CONFIGURACIÓN CENTRAL
+# ─────────────────────────────────────────
+
+GEE_PROJECT = 'ingenieriadatos1'   # ← pon tu ID acá arriba, junto a las otras constantes
+
+RAW_PATH        = 'data/raw/'
+DRIVE_FOLDER    = 'ERA5_Colombia_RAW'     # Carpeta que se crea en tu Google Drive
+DATE_START      = '2000-01-01'
+DATE_END        = '2024-12-31'
+SCALE_M         = 11132                   # Resolución nativa ERA5-Land (~11 km)
+
+# Bounding box Colombia completa [W, S, E, N]
+# Cambia a [−76.1, 4.0, −75.2, 5.6] si solo quieres el Eje Cafetero
+BBOX = [-79.0, -4.3, -66.8, 12.5]
+
+# Variables ERA5-Land a descargar (nombres exactos del catálogo GEE)
+# temperature_2m        → Kelvin  (réstale 273.15 en Silver para °C)
+# surface_pressure      → Pascales
+# total_precipitation_sum → metros/día  (multiplica ×1000 para mm/día en Silver)
+VARIABLES = [
+    'temperature_2m',
+    'surface_pressure',
+    'total_precipitation_sum',
+]
+
+# ERA5-Land diario en GEE está disponible desde 1950 hasta ~3 meses atrás
+DATASET_ID = 'ECMWF/ERA5_LAND/DAILY_AGGR'
+
+
+# ─────────────────────────────────────────
+#  UTILIDADES
+# ─────────────────────────────────────────
 
 def preparar_entorno():
     os.makedirs(RAW_PATH, exist_ok=True)
+    print(f"📁 Directorio RAW listo: {RAW_PATH}")
 
-def descargar_datos():
-    c = cdsapi.Client()
-    area = [5.6, -76.1, 4.0, -75.2]
-    
-    # Colombia es UTC-5. 
-    # Para tener 00:00 local -> Pedimos 05:00 UTC
-    # Para tener 12:00 local -> Pedimos 17:00 UTC
-    horas_utc = ['05:00', '17:00']
-
-    anios = range(2024, 2026)
-    meses = [f"{m:02d}" for m in range(1, 13)]
-    dias =  [f"{d:02d}" for d in range(1, 32)]
-    bloques = [anios[i:i+2] for i in range(0, len(anios), 2)]
-    
-    for bloque in bloques:
-        anios_str = [str(a) for a in bloque]
-        nombre_p = os.path.join(RAW_PATH, f'pressure_{anios_str[0]}_{anios_str[-1]}.nc')
-        nombre_l = os.path.join(RAW_PATH, f'land_{anios_str[0]}_{anios_str[-1]}.nc')
-
-        if os.path.exists(nombre_p) and os.path.exists(nombre_l):
-            print(f"⏩ Saltando bloque {anios_str[0]}-{anios_str[-1]} (ya descargado).")
-            continue
-        
-        print(f"--- Descargando bloque: {anios_str[0]}-{anios_str[-1]} ---")
-        c.retrieve('reanalysis-era5-pressure-levels', {
-            'variable': ['temperature', 'u_component_of_wind', 'v_component_of_wind'],
-            'pressure_level': '1000',
-            'product_type': 'reanalysis',
-            'year': anios_str,
-            'month': meses,
-            'day': dias,
-            'time': horas_utc,
-            'area': area,
-            'format': 'netcdf',
-        }, nombre_p)
-
-        print("--- Descargando ERA5-Land ---")
-        c.retrieve('reanalysis-era5-land', {
-            'variable': ['2m_temperature', 'surface_pressure', 'total_precipitation'],
-            'year': anios_str,
-            'month': meses,
-            'day': dias,
-            'time': horas_utc,
-            'area': area,
-            'format': 'netcdf'
-        }, nombre_l)
-    
-def descomprimir_todos_los_zips():
-    """Busca archivos .nc que en realidad son ZIP y los extrae."""
-    zips = glob.glob(os.path.join(RAW_PATH, "*.nc")) + glob.glob(os.path.join(RAW_PATH, "*.zip"))
-    
-    for filepath in zips:
-        try:
-            with open(filepath, 'rb') as f:
-                magic = f.read(4)
-            
-            if magic == b'PK\x03\x04':  # Firma estándar de un archivo ZIP
-                print(f"📦 Descomprimiendo: {os.path.basename(filepath)}...")
-                extract_dir = filepath + "_tmp"
-                with zipfile.ZipFile(filepath, 'r') as z:
-                    z.extractall(extract_dir)
-                
-                # Buscamos el archivo .nc real que estaba dentro
-                nc_internos = glob.glob(os.path.join(extract_dir, "*.nc"))
-                if nc_internos:
-                    # Sobrescribimos el original con el contenido real
-                    shutil.move(nc_internos[0], filepath)
-                    print(f"   ✅ Extraído con éxito.")
-                
-                shutil.rmtree(extract_dir)
-        except Exception as e:
-            print(f"   ⚠️ No se pudo procesar como ZIP: {filepath} ({e})")
-
-def consolidar_a_bronze_parquet():
-    print("\n--- Iniciando Consolidación Capa Bronze ---")
-    os.makedirs(RAW_PATH, exist_ok=True)
-    
-    # 1. Limpieza previa de archivos ZIP
-    descomprimir_todos_los_zips()
-
+def inicializar_gee():
     try:
-        # 2. Identificar todos los fragmentos (bloques de años)
-        # Suponiendo que tus archivos se llaman 'pressure_2000_2005.nc', etc.
-        files_p = glob.glob(os.path.join(RAW_PATH, "pressure_*.nc"))
-        files_l = glob.glob(os.path.join(RAW_PATH, "land_*.nc"))
-
-        if not files_p or not files_l:
-            raise FileNotFoundError("No se encontraron archivos .nc para consolidar.")
-
-        print(f"📂 Fragmentos encontrados: {len(files_p)} de Pressure, {len(files_l)} de Land.")
-
-        # 3. Carga Multi-Archivo con Xarray
-        # 'combine=by_coords' une los años automáticamente siguiendo la línea de tiempo
-        print("🔗 Uniendo fragmentos temporales...")
-        ds_p = xr.open_mfdataset(files_p, combine='by_coords', engine='h5netcdf').squeeze()
-        ds_l = xr.open_mfdataset(files_l, combine='by_coords', engine='h5netcdf').squeeze()
-
-        # 4. Transformación a DataFrame
-        print("🚀 Convirtiendo a DataFrames (esto puede tardar según el volumen)...")
-        df_p = ds_p.to_dataframe().reset_index()
-        df_l = ds_l.to_dataframe().reset_index()
-
-        # 5. Volcado a Parquet usando DuckDB (Máxima compresión y velocidad)
-        con = duckdb.connect()
-        path_p = os.path.join(RAW_PATH, 'pressure_bronze.parquet')
-        path_l = os.path.join(RAW_PATH, 'land_bronze.parquet')
-
-        print("💾 Guardando en formato Parquet...")
-        con.execute(f"COPY df_p TO '{path_p}' (FORMAT PARQUET)")
-        con.execute(f"COPY df_l TO '{path_l}' (FORMAT PARQUET)")
-
-        print(f"\n--- REPORTE BRONZE ---")
-        print(f"✅ Pressure Bronze: {len(df_p)} registros")
-        print(f"✅ Land Bronze: {len(df_l)} registros")
-        print(f"📍 Archivos listos en: {RAW_PATH}")
-
+        ee.Initialize(project=GEE_PROJECT)   # ← único cambio
+        print("✅ Google Earth Engine inicializado.")
     except Exception as e:
-        print(f"❌ Error crítico en la consolidación: {e}")
+        print("⚠️  GEE no autenticado. Ejecuta en terminal:")
+        print("      earthengine authenticate")
+        raise
+
+
+# ─────────────────────────────────────────
+#  DESCARGA: LANZAR EXPORT TASKS EN GEE
+# ─────────────────────────────────────────
+
+def lanzar_exports_gee():
+    """
+    Parte el rango 2000-2024 en bloques de 5 años para evitar timeouts
+    y lanza un Export.table.toDrive por bloque.
+    Retorna lista de tasks activas.
+    """
+    region = ee.Geometry.Rectangle(BBOX)
+
+    # Bloques de 5 años → 5 tasks en paralelo
+    bloques = [
+        ('2000-01-01', '2004-12-31', 'ERA5_Colombia_2000_2004'),
+        ('2005-01-01', '2009-12-31', 'ERA5_Colombia_2005_2009'),
+        ('2010-01-01', '2014-12-31', 'ERA5_Colombia_2010_2014'),
+        ('2015-01-01', '2019-12-31', 'ERA5_Colombia_2015_2019'),
+        ('2020-01-01', '2024-12-31', 'ERA5_Colombia_2020_2024'),
+    ]
+
+    tasks = []
+    for fecha_ini, fecha_fin, nombre in bloques:
+
+        # Verificar si ya existe el CSV final en RAW_PATH
+        patron = os.path.join(RAW_PATH, f"{nombre}*.csv")
+        if glob.glob(patron):
+            print(f"⏩ Ya existe {nombre}. Saltando...")
+            continue
+
+        print(f"🚀 Lanzando export: {nombre}  ({fecha_ini} → {fecha_fin})")
+
+        coleccion = (
+            ee.ImageCollection(DATASET_ID)
+            .filterDate(fecha_ini, fecha_fin)
+            .filterBounds(region)
+            .select(VARIABLES)
+        )
+
+        # Convertimos la ImageCollection a FeatureCollection
+        # addBands con la fecha como propiedad de cada pixel
+        def imagen_a_features(imagen):
+            fecha = imagen.date().format('YYYY-MM-dd')
+            fc = imagen.sample(
+                region=region,
+                scale=SCALE_M,
+                geometries=True,          # incluye lat/lon de cada pixel
+                dropNulls=True,
+            )
+            return fc.map(lambda f: f.set('date', fecha))
+
+        fc_total = coleccion.map(imagen_a_features).flatten()
+
+        task = ee.batch.Export.table.toDrive(
+            collection=fc_total,
+            description=nombre,
+            folder=DRIVE_FOLDER,
+            fileNamePrefix=nombre,
+            fileFormat='CSV',
+            selectors=['date', 'longitude', 'latitude']
+                      + VARIABLES,        # columnas ordenadas
+        )
+        task.start()
+        tasks.append((nombre, task))
+        print(f"   ✅ Task lanzada. ID: {task.id}")
+
+    return tasks
+
+
+# ─────────────────────────────────────────
+#  MONITOREO DE TASKS
+# ─────────────────────────────────────────
+
+def monitorear_tasks(tasks, intervalo_seg=60):
+    """
+    Polling hasta que todas las tasks terminen o fallen.
+    """
+    if not tasks:
+        print("ℹ️  No hay tasks nuevas que monitorear.")
+        return
+
+    print(f"\n⏳ Monitoreando {len(tasks)} tasks (polling cada {intervalo_seg}s)...")
+    pendientes = list(tasks)
+
+    while pendientes:
+        time.sleep(intervalo_seg)
+        aun_pendientes = []
+
+        for nombre, task in pendientes:
+            estado = task.status()['state']
+
+            if estado == 'COMPLETED':
+                print(f"   ✅ COMPLETADA: {nombre}")
+            elif estado == 'FAILED':
+                error = task.status().get('error_message', 'sin detalle')
+                print(f"   ❌ FALLIDA: {nombre} → {error}")
+            else:
+                print(f"   ⏳ {nombre}: {estado}")
+                aun_pendientes.append((nombre, task))
+
+        pendientes = aun_pendientes
+
+    print("\n🎉 Todas las tasks finalizaron.")
+
+
+# ─────────────────────────────────────────
+#  CONSOLIDAR CSVs → raw.parquet
+# ─────────────────────────────────────────
+
+def consolidar_a_raw_parquet():
+    """
+    Lee todos los CSVs descargados de Drive (que debes copiar a data/raw/)
+    y los consolida en un único raw.parquet vía DuckDB.
+    """
+    parquet_final = os.path.join(RAW_PATH, 'raw.parquet')
+
+    if os.path.exists(parquet_final):
+        print(f"⏩ {parquet_final} ya existe. Saltando consolidación.")
+        return
+
+    csv_files = glob.glob(os.path.join(RAW_PATH, 'ERA5_Colombia_*.csv'))
+
+    if not csv_files:
+        print("⚠️  No se encontraron CSVs en data/raw/.")
+        print("    Descarga los archivos de Google Drive y cópialos ahí.")
+        return
+
+    print(f"\n📂 {len(csv_files)} archivos CSV encontrados. Consolidando...")
+
+    con = duckdb.connect()
+
+    # DuckDB puede leer y unir múltiples CSVs en una sola query
+    archivos_str = ', '.join([f"'{f}'" for f in csv_files])
+
+    con.execute(f"""
+        COPY (
+            SELECT
+                date::DATE                              AS fecha,
+                longitude::DOUBLE                       AS longitud,
+                latitude::DOUBLE                        AS latitud,
+                temperature_2m::DOUBLE                  AS temperatura_2m_k,
+                surface_pressure::DOUBLE                AS presion_superficie_pa,
+                total_precipitation_sum::DOUBLE         AS precipitacion_total_m
+            FROM read_csv_auto([{archivos_str}], union_by_name=True)
+            ORDER BY fecha, latitud, longitud
+        )
+        TO '{parquet_final}'
+        (FORMAT PARQUET, COMPRESSION ZSTD)
+    """)
+
+    # Reporte rápido
+    stats = con.execute(f"""
+        SELECT
+            COUNT(*)                        AS total_registros,
+            MIN(fecha)                      AS fecha_min,
+            MAX(fecha)                      AS fecha_max,
+            COUNT(DISTINCT fecha)           AS dias_unicos,
+            COUNT(DISTINCT longitud || ',' || latitud::VARCHAR) AS pixeles_unicos
+        FROM '{parquet_final}'
+    """).fetchdf()
+
+    print("\n─── REPORTE RAW ─────────────────────────────")
+    print(f"  Total registros : {stats['total_registros'].iloc[0]:,}")
+    print(f"  Rango temporal  : {stats['fecha_min'].iloc[0]}  →  {stats['fecha_max'].iloc[0]}")
+    print(f"  Días únicos     : {stats['dias_unicos'].iloc[0]:,}")
+    print(f"  Píxeles únicos  : {stats['pixeles_unicos'].iloc[0]:,}")
+    print(f"  Guardado en     : {parquet_final}")
+    print("─────────────────────────────────────────────")
+
+
+# ─────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────
 
 def procesar_raw():
     preparar_entorno()
-    descargar_datos() 
-    consolidar_a_bronze_parquet()
+    inicializar_gee()
+
+    # Paso 1: lanzar exports en GEE (corren en la nube, no en tu PC)
+    tasks = lanzar_exports_gee()
+
+    # Paso 2: esperar a que terminen
+    monitorear_tasks(tasks, intervalo_seg=60)
+
+    # Paso 3: INSTRUCCIONES para el usuario
+    print("\n" + "═"*55)
+    print("  ACCIÓN MANUAL REQUERIDA")
+    print("═"*55)
+    print(f"  1. Abre Google Drive")
+    print(f"  2. Entra a la carpeta: {DRIVE_FOLDER}")
+    print(f"  3. Descarga todos los archivos ERA5_Colombia_*.csv")
+    print(f"  4. Cópialos a: {os.path.abspath(RAW_PATH)}")
+    print(f"  5. Vuelve a correr este script")
+    print("═"*55 + "\n")
+
+    # Paso 4: consolidar si ya están los CSVs
+    consolidar_a_raw_parquet()
+
 
 if __name__ == "__main__":
     procesar_raw()
