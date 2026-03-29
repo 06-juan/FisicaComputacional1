@@ -23,7 +23,7 @@ GEE_PROJECT = 'ingenieriadatos1'   # ← pon tu ID acá arriba, junto a las otra
 
 RAW_PATH        = 'data/raw/'
 DRIVE_FOLDER    = 'ERA5_Colombia_RAW'     # Carpeta que se crea en tu Google Drive
-DATE_START      = '2000-01-01'
+DATE_START      = '2015-01-01'
 DATE_END        = '2024-12-31'
 SCALE_M         = 11132                   # Resolución nativa ERA5-Land (~11 km)
 
@@ -31,14 +31,16 @@ SCALE_M         = 11132                   # Resolución nativa ERA5-Land (~11 km
 # Cambia a [−76.1, 4.0, −75.2, 5.6] si solo quieres el Eje Cafetero
 BBOX = [-79.0, -4.3, -66.8, 12.5]
 
-# Variables ERA5-Land a descargar (nombres exactos del catálogo GEE)
-# temperature_2m        → Kelvin  (réstale 273.15 en Silver para °C)
-# surface_pressure      → Pascales
-# total_precipitation_sum → metros/día  (multiplica ×1000 para mm/día en Silver)
+# VARIABLES CRÍTICAS PARA CAFÉ
+# surface_solar_radiation_downwards (J/m²) -> Energía para fotosíntesis
+# dewpoint_temperature_2m (K) -> Para calcular Humedad Relativa
+# potential_evaporation (m) -> Para estrés hídrico
 VARIABLES = [
-    'temperature_2m',
-    'surface_pressure',
+    'temperature_2m', 
     'total_precipitation_sum',
+    'surface_solar_radiation_downwards_sum',
+    'dewpoint_temperature_2m',
+    'potential_evaporation_sum'              
 ]
 
 # ERA5-Land diario en GEE está disponible desde 1950 hasta ~3 meses atrás
@@ -68,26 +70,21 @@ def inicializar_gee():
 # ─────────────────────────────────────────
 
 def lanzar_exports_gee():
-    """
-    Parte el rango 2000-2024 en bloques de 5 años para evitar timeouts
-    y lanza un Export.table.toDrive por bloque.
-    Retorna lista de tasks activas.
-    """
     region = ee.Geometry.Rectangle(BBOX)
 
-    # Bloques de 5 años → 5 tasks en paralelo
     bloques = [
-        ('2000-01-01', '2004-12-31', 'ERA5_Colombia_2000_2004'),
-        ('2005-01-01', '2009-12-31', 'ERA5_Colombia_2005_2009'),
-        ('2010-01-01', '2014-12-31', 'ERA5_Colombia_2010_2014'),
-        ('2015-01-01', '2019-12-31', 'ERA5_Colombia_2015_2019'),
-        ('2020-01-01', '2024-12-31', 'ERA5_Colombia_2020_2024'),
+        #('2000-01-01', '2004-12-31', 'ERA5_Colombia_2000_2004'),
+        #('2005-01-01', '2009-12-31', 'ERA5_Colombia_2005_2009'),
+        #('2010-01-01', '2014-12-31', 'ERA5_Colombia_2010_2014'),
+        #('2015-01-01', '2019-12-31', 'ERA5_Colombia_2015_2019'),
+        #('2020-01-01', '2024-12-31', 'ERA5_Colombia_2020_2024'),
+        ('2024-01-01', '2024-06-30', 'ERA5_Colombia_M1'),
+        ('2024-07-01', '2024-12-31', 'ERA5_Colombia_M2'),
     ]
 
     tasks = []
     for fecha_ini, fecha_fin, nombre in bloques:
 
-        # Verificar si ya existe el CSV final en RAW_PATH
         patron = os.path.join(RAW_PATH, f"{nombre}*.csv")
         if glob.glob(patron):
             print(f"⏩ Ya existe {nombre}. Saltando...")
@@ -102,17 +99,22 @@ def lanzar_exports_gee():
             .select(VARIABLES)
         )
 
-        # Convertimos la ImageCollection a FeatureCollection
-        # addBands con la fecha como propiedad de cada pixel
         def imagen_a_features(imagen):
             fecha = imagen.date().format('YYYY-MM-dd')
             fc = imagen.sample(
                 region=region,
                 scale=SCALE_M,
-                geometries=True,          # incluye lat/lon de cada pixel
+                geometries=True,
                 dropNulls=True,
             )
-            return fc.map(lambda f: f.set('date', fecha))
+            def agregar_coords(f):
+                coords = f.geometry().coordinates()
+                return f.set({
+                    'longitude': coords.get(0),
+                    'latitude':  coords.get(1),
+                    'date':      fecha,
+                })
+            return fc.map(agregar_coords)
 
         fc_total = coleccion.map(imagen_a_features).flatten()
 
@@ -122,8 +124,7 @@ def lanzar_exports_gee():
             folder=DRIVE_FOLDER,
             fileNamePrefix=nombre,
             fileFormat='CSV',
-            selectors=['date', 'longitude', 'latitude']
-                      + VARIABLES,        # columnas ordenadas
+            selectors=['date', 'longitude', 'latitude'] + VARIABLES,
         )
         task.start()
         tasks.append((nombre, task))
@@ -174,8 +175,8 @@ def monitorear_tasks(tasks, intervalo_seg=60):
 
 def consolidar_a_raw_parquet():
     """
-    Lee todos los CSVs descargados de Drive (que debes copiar a data/raw/)
-    y los consolida en un único raw.parquet vía DuckDB.
+    Consolida los fragmentos CSV de la 'Gold Mission' (con variables biofísicas)
+    en un único archivo raw.parquet usando DuckDB.
     """
     parquet_final = os.path.join(RAW_PATH, 'raw.parquet')
 
@@ -183,29 +184,32 @@ def consolidar_a_raw_parquet():
         print(f"⏩ {parquet_final} ya existe. Saltando consolidación.")
         return
 
-    csv_files = glob.glob(os.path.join(RAW_PATH, 'ERA5_Colombia_*.csv'))
+    # Buscamos los archivos con el nuevo prefijo de la Super-Ingesta
+    csv_files = glob.glob(os.path.join(RAW_PATH, 'ERA5_*.csv'))
 
     if not csv_files:
-        print("⚠️  No se encontraron CSVs en data/raw/.")
-        print("    Descarga los archivos de Google Drive y cópialos ahí.")
+        print(f"⚠️  No se encontraron CSVs en {RAW_PATH}.")
+        print("    Asegúrate de haber copiado los archivos 'ERA5_...' desde Drive.")
         return
 
-    print(f"\n📂 {len(csv_files)} archivos CSV encontrados. Consolidando...")
+    print(f"\n📂 {len(csv_files)} archivos CSV encontrados. Iniciando consolidación...")
 
     con = duckdb.connect()
 
-    # DuckDB puede leer y unir múltiples CSVs en una sola query
+    # DuckDB procesa la lista de archivos eficientemente
     archivos_str = ', '.join([f"'{f}'" for f in csv_files])
 
     con.execute(f"""
         COPY (
             SELECT
-                date::DATE                              AS fecha,
-                longitude::DOUBLE                       AS longitud,
-                latitude::DOUBLE                        AS latitud,
-                temperature_2m::DOUBLE                  AS temperatura_2m_k,
-                surface_pressure::DOUBLE                AS presion_superficie_pa,
-                total_precipitation_sum::DOUBLE         AS precipitacion_total_m
+                date::DATE                                   AS fecha,
+                longitude::DOUBLE                            AS longitud,
+                latitude::DOUBLE                             AS latitud,
+                temperature_2m::DOUBLE                       AS temp_k,
+                dewpoint_temperature_2m::DOUBLE              AS dew_k,
+                total_precipitation_sum::DOUBLE              AS lluvia_m,
+                surface_solar_radiation_downwards_sum::DOUBLE AS rad_j_m2,
+                potential_evaporation_sum::DOUBLE            AS evap_pot_m
             FROM read_csv_auto([{archivos_str}], union_by_name=True)
             ORDER BY fecha, latitud, longitud
         )
@@ -213,25 +217,11 @@ def consolidar_a_raw_parquet():
         (FORMAT PARQUET, COMPRESSION ZSTD)
     """)
 
-    # Reporte rápido
-    stats = con.execute(f"""
-        SELECT
-            COUNT(*)                        AS total_registros,
-            MIN(fecha)                      AS fecha_min,
-            MAX(fecha)                      AS fecha_max,
-            COUNT(DISTINCT fecha)           AS dias_unicos,
-            COUNT(DISTINCT longitud || ',' || latitud::VARCHAR) AS pixeles_unicos
-        FROM '{parquet_final}'
-    """).fetchdf()
-
-    print("\n─── REPORTE RAW ─────────────────────────────")
-    print(f"  Total registros : {stats['total_registros'].iloc[0]:,}")
-    print(f"  Rango temporal  : {stats['fecha_min'].iloc[0]}  →  {stats['fecha_max'].iloc[0]}")
-    print(f"  Días únicos     : {stats['dias_unicos'].iloc[0]:,}")
-    print(f"  Píxeles únicos  : {stats['pixeles_unicos'].iloc[0]:,}")
-    print(f"  Guardado en     : {parquet_final}")
-    print("─────────────────────────────────────────────")
-
+    # Reporte de volumen de datos
+    stats = con.execute(f"SELECT COUNT(*) FROM '{parquet_final}'").fetchone()[0]
+    print(f"✅ Consolidación finalizada.")
+    print(f"📦 Registros totales procesados: {stats:,}")
+    print(f"💾 Archivo guardado en: {parquet_final}")
 
 # ─────────────────────────────────────────
 #  ENTRY POINT
