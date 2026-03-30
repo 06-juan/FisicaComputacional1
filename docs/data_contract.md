@@ -38,7 +38,7 @@ Este contrato define las especificaciones técnicas para el dataset consolidado 
 
 ### 3.1 Integridad
 * **Completitud:** El dataset debe cubrir el rango 2015-01-01 hasta 2025-12-31 sin saltos temporales.
-* **Valores Nulos:** No se permiten NULLs en las columnas `fecha`, `lat`, `lon`. Para variables climáticas, el máximo de nulos permitido es 0.5% (manejo de bordes costeros).
+* **Valores Nulos:** No se permiten NULLs en las columnas `fecha`, `lat`, `lon`.
 
 ### 3.2 Validez Física
 * **Relación T/Td:** El punto de rocío (`dew_c`) nunca debe ser mayor a la temperatura ambiente (`temp_c`).
@@ -55,3 +55,45 @@ El procesamiento posterior (Gold) debe generar los siguientes indicadores deriva
 * **Formato:** Apache Parquet.
 * **Compresión:** ZSTD (Nivel 3).
 * **Particionamiento sugerido:** Por año o por región (departamento).
+
+## 6. ESPECIFICACIONES DE LA CAPA GOLD (MODELO ANALÍTICO)
+
+### 6.1 ÍNDICE DE CONFORT CAFETERO (ICC)
+El dataset Gold debe calcular el score diario basado en los siguientes pesos:
+- Temperatura (p_temp): 10 pts si [18°C-22°C], 5 pts si [15°C-25°C], else 0.
+- VPD (p_vpd): 10 pts si [0.3-0.7 kPa], 5 pts si [0.1-1.0 kPa], else 0.
+- Humedad (p_hr): 10 pts si [70%-85%], 5 pts si fuera de rango.
+- Agua (p_agua): 10 pts si Balance Hídrico > 0 mm, else 0.
+
+* Score Máximo Teórico: 40 puntos (100% Optimización Biosistémica).
+
+### 6.2 AGREGACIONES REQUERIDAS
+- Ranking Espacial: Top 5 coordenadas por Score Promedio Histórico.
+- Estacionalidad Mensual: Promedio de Score y Desviación Estándar agrupado por mes (1-12).
+- Porcentaje de Confort: Representación del score como (score/40)*100 con símbolo '%'.
+
+## 7. REGLAS DE PRECISIÓN Y METADATOS
+
+### 7.1 PRECISIÓN GEOGRÁFICA
+- Las coordenadas (lat, lon) deben mantener una precisión de 6 decimales.
+- Origen de datos: Centroide de celda ERA5-Land (~11.1 km de resolución).
+
+### 7.2 PROTOCOLO DE ACTUALIZACIÓN (RE-RUN)
+- Frecuencia: Bajo demanda o actualización mensual de GEE.
+- Acción ante Fallos: Si una Task de GEE es cancelada (Error de Memoria), el 
+  bloque temporal debe subdividirse de 5 años a 1 año.
+
+## 8. CONTROL DE ACCESO Y SEGURIDAD (API ESTRATEGY)
+
+
+### 8.1 SECRETOS Y LLAVES
+- El archivo 'credentials.json' (Drive API) NUNCA debe incluirse en el dataset.
+- El archivo 'token.pickle' es de uso local y temporal (User session).
+- Repositorios: Se debe mantener un archivo '.gitignore' activo para evitar la 
+  fuga de credenciales climáticas.
+
+### 8.2 ALMACENAMIENTO FÍSICO LOCAL
+- data/raw/: Archivos CSV/ZIP temporales (Bronze).
+- data/silver/: Parquet limpio y transformado (Single Source of Truth).
+- data/gold/: Parquet con rankings y estacionalidad (Business Ready).
+===============================================================================

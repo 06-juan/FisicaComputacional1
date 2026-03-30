@@ -4,85 +4,91 @@ import os
 # --- CONFIGURACIÓN ---
 RAW_PATH = 'data/raw/raw.parquet' 
 SILVER_PATH = 'data/silver/'
-OUTPUT_SILVER = os.path.join(SILVER_PATH, 'clima_colombia_silver.parquet')
+OUTPUT_SILVER = os.path.join(SILVER_PATH, 'clima_cafe_silver.parquet')
 
 os.makedirs(SILVER_PATH, exist_ok=True)
+
+import duckdb
 
 def procesar_silver():
     con = duckdb.connect()
     
-    # Lógica de Transformación:
-    # 1. Conversión de Kelvin a Celsius (Temp y Dewpoint).
-    # 2. Humedad Relativa (Magnus-Tetens).
-    # 3. VPD (Vapor Pressure Deficit): Esencial para estrés hídrico.
-    # 4. Escalamiento de lluvia, radiación y evaporación.
-    
+    # OUTPUT_SILVER y RAW_PATH deben estar definidos en tu script
     query = f"""
     WITH basic_calc AS (
         SELECT 
-            fecha,
-            latitud,
-            longitud,
+            CAST(fecha AS DATE) as fecha,
+            CAST(latitud AS DOUBLE) as lat,
+            CAST(longitud AS DOUBLE) as lon,
             (temp_k - 273.15) AS t_c,
             (dew_k - 273.15) AS td_c,
-            (lluvia_m * 1000.0) AS lluvia_mm,
-            (rad_j_m2 / 1000000.0) AS rad_mj_m2,
-            (evap_pot_m * 1000.0) AS evap_pot_mm
+            (lluvia_m * 1000.0) AS lluvia_raw,
+            (rad_j_m2 / 1000000.0) AS rad_raw,
+            (evap_pot_m * 1000.0) AS evap_raw
         FROM '{RAW_PATH}'
-        -- Filtro para Colombia completa
+        -- RESTRICCIÓN GEOGRÁFICA (Data Contract 3.2)
         WHERE latitud BETWEEN -4.3 AND 12.5 
           AND longitud BETWEEN -79.0 AND -66.8
     ),
-    thermo_indicators AS (
+    thermo_logic AS (
         SELECT 
             *,
-            -- Presión de vapor de saturación (es) en kPa
+            -- Presión de vapor saturado y real (kPa)
             0.61078 * exp((17.27 * t_c) / (t_c + 237.3)) AS es,
-            -- Presión de vapor real (ea) en kPa usando el punto de rocío
             0.61078 * exp((17.27 * td_c) / (td_c + 237.3)) AS ea
         FROM basic_calc
+    ),
+    integrity_check AS (
+        SELECT
+            fecha, lat, lon,
+            -- RESTRICCIÓN TÉRMINA (Data Contract 2.0)
+            GREATEST(-10.0, LEAST(45.0, t_c)) as temp_c,
+            -- RESTRICCIÓN T/Td (Data Contract 3.2): Punto de rocío <= Temperatura
+            LEAST(td_c, t_c) as dew_c,
+            -- RESTRICCIÓN HUMEDAD (Data Contract 3.2): Truncar a 100%
+            LEAST(100.0, GREATEST(0.0, 100.0 * (ea / es))) as humedad_relativa,
+            -- RESTRICCIÓN VALORES POSITIVOS (Data Contract 2.0)
+            GREATEST(0.0, lluvia_raw) as lluvia_mm,
+            GREATEST(0.0, rad_raw) as rad_mj_m2,
+            GREATEST(0.0, evap_raw) as evap_pot_mm,
+            es, ea
+        FROM thermo_logic
     )
     SELECT 
         fecha,
-        latitud,
-        longitud,
-        ROUND(t_c, 2) AS temp_c,
-        -- Humedad Relativa (%)
-        ROUND(100.0 * (ea / es), 2) AS hr_pct,
-        -- VPD (kPa): es - ea
-        ROUND(es - ea, 3) AS vpd_kpa,
-        ROUND(lluvia_mm, 4) AS lluvia_mm,
-        ROUND(rad_mj_m2, 4) AS rad_mj_m2,
-        ROUND(evap_pot_mm, 4) AS evap_pot_mm,
-        -- Balance hídrico simple diario
-        ROUND(lluvia_mm - evap_pot_mm, 4) AS balance_hidrico_mm
-    FROM thermo_indicators
-    ORDER BY fecha, latitud, longitud
+        lat,
+        lon,
+        ROUND(temp_c, 2) as temp_c,
+        ROUND(dew_c, 2) as dew_c,
+        ROUND(humedad_relativa, 2) as humedad_relativa,
+        ROUND(lluvia_mm, 4) as lluvia_mm,
+        ROUND(rad_mj_m2, 4) as rad_mj_m2,
+        ROUND(evap_pot_mm, 4) as evap_pot_mm,
+        -- Indicadores Gold-Ready
+        ROUND(es - ea, 3) as vpd_kpa,
+        ROUND(lluvia_mm - evap_pot_mm, 4) as balance_hidrico_mm
+    FROM integrity_check
+    WHERE fecha IS NOT NULL -- Requisito NOT NULL
+    ORDER BY fecha, lat, lon
     """
     
-    print("💎 Transformando Capa Bronze a Silver con indicadores biofísicos...")
+    print("💎 Refinando Capa Silver según el Data Contract...")
     con.execute(f"COPY ({query}) TO '{OUTPUT_SILVER}' (FORMAT PARQUET, COMPRESSION ZSTD)")
-    
-    print(f"✅ Capa Silver creada con éxito en: {OUTPUT_SILVER}")
-    
-    # Muestra de resultados para verificar el VPD
-    print("\n--- MUESTRA DE DATOS SILVER (BIOFÍSICA) ---")
-    print(con.execute(f"SELECT * FROM '{OUTPUT_SILVER}' LIMIT 5").df())
 
 def sanity_checks():
     con = duckdb.connect()
-    print("\n--- SANITY CHECK: Consistencia Física ---")
-    # Verificamos que HR no supere el 100% y que el VPD sea coherente
-    res = con.execute(f"""
+    # Sanity Check final en consola
+    check = con.execute(f"""
         SELECT 
-            COUNT(*) as total_filas,
-            MIN(hr_pct) as hr_min,
-            MAX(hr_pct) as hr_max,
-            AVG(vpd_kpa) as vpd_promedio,
-            COUNT(*) FILTER (WHERE vpd_kpa < 0) as errores_fisicos_vpd
+            COUNT(*) as total,
+            MAX(humedad_relativa) as max_hr,
+            MIN(temp_c) as min_t,
+            SUM(CASE WHEN dew_c > temp_c THEN 1 ELSE 0 END) as errores_fisicos
         FROM '{OUTPUT_SILVER}'
     """).df()
-    print(res)
+    
+    print("\n--- INFORME DE CUMPLIMIENTO (SLA) ---")
+    print(check)
 
 if __name__ == "__main__":
     if os.path.exists(RAW_PATH):

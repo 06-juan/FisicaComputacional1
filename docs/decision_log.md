@@ -2,6 +2,24 @@
 
 Este documento registra las decisiones críticas tomadas durante el desarrollo del pipeline de datos (Arquitectura Medallion), su justificación física y técnica, y las soluciones a los cuellos de botella encontrados.
 
+# 29/03/2026 Juan  Jose
+---
+
+## 1. Rumbo Gold
+**Problema:** No teniamos una pregunta a responder
+
+**Decisión:** Buscar cuales son los mejores lugares en el eje cafetero para sembrar café segun el clima y la fisiologia de la planta de café
+
+**Justificación:** Esto nos da un rumbo a seguir.
+
+## 1. Descarga de datos
+**Problema:** Copernico demoraba mucho.
+
+**Decisión:** Usamos GEE de google y lo guarda en Drive.
+
+**Justificación:** Es mucho mas rapido.
+
+
 # 28/03/2026 Juan  Jose
 ---
 
