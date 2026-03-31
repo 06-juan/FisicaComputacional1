@@ -1,6 +1,4 @@
-===============================================================================
-   PIPELINE DE INGENIERÍA DE DATOS CLIMÁTICOS: ERA5-LAND & CAFÉ ☕🌦️
-===============================================================================
+PIPELINE DE INGENIERÍA DE DATOS CLIMÁTICOS: ERA5-LAND & CAFÉ ☕🌦️
 
 Este proyecto implementa una arquitectura de datos tipo Medallion optimizada 
 para el análisis agroclimático en el Eje Cafetero, utilizando datos de alta 
@@ -10,39 +8,64 @@ resolución de ERA5-Land vía Google Earth Engine (GEE).
 1. ARQUITECTURA DEL PROYECTO (MEDALLION+)
 -------------------------------------------------------------------------------
 
-El flujo de datos se ha automatizado para eliminar la descarga manual:
+El flujo de datos se ha automatizado mediante una lógica de cascada inteligente:
 
-A. CAPA RAW (Cloud): 
-   Exportación de fragmentos temporales desde GEE a Google Drive (CSV/ZIP).
+A. CAPA RAW (Cloud & Drive): 
+   Exportación asíncrona de fragmentos anuales desde GEE a Google Drive en 
+   formato CSV. Monitoreo de tareas en tiempo real desde el script local.
 
-B. CAPA BRONZE (Local Ingest): 
-   Descarga automática desde Drive a 'data/raw/' y consolidación masiva 
-   en un único archivo 'raw.parquet' usando DuckDB.
+B. CAPA BRONZE (Ingesta Local): 
+   Sincronización automática Drive -> Local ('data/raw/'). Se utiliza DuckDB 
+   para realizar una consolidación masiva de múltiples archivos CSV en un único 
+   'raw.parquet' optimizado con compresión ZSTD.
 
 C. CAPA SILVER (Transformación): 
-   Limpieza, conversión de unidades (K a °C, Joules a MJ/m2) y cálculo de 
-   variables derivadas (Humedad Relativa, Evapotranspiración).
+   Limpieza, conversión de unidades físicas y cálculo de variables derivadas 
+   (Humedad Relativa, Radiación en MJ/m2) necesarias para modelos agronómicos.
 
 D. CAPA GOLD (Analítica): 
-   Agregaciones espaciales y temporales para modelos de calidad de café.
+   Agregaciones espaciales (BBOX Eje Cafetero) y temporales para indicadores 
+   de calidad y fenología del café.
 
 -------------------------------------------------------------------------------
 2. CONFIGURACIÓN DE CREDENCIALES
 -------------------------------------------------------------------------------
 
-El sistema requiere dos niveles de acceso para la automatización total:
+El sistema utiliza un archivo '.env' para gestionar credenciales sensibles. 
+Sigue estos pasos para configurar tu entorno:
 
-- GOOGLE EARTH ENGINE (GEE): 
-  Necesario para procesar en la nube. Ejecuta en terminal:
-  > earthengine authenticate
+A. CREACIÓN DEL ARCHIVO .ENV:
+   En la raíz del proyecto, crea un archivo llamado '.env' (sin nombre, solo 
+   la extensión) y añade el siguiente contenido:
 
-- GOOGLE DRIVE API: 
-  Para descargar automáticamente los archivos procesados.
-  1. Habilita 'Google Drive API' en Google Cloud Console.
-  2. Descarga las credenciales 'Desktop App' como 'credentials.json'.
-  3. Guárdalo en la raíz de este proyecto.
-  * Nota: La primera ejecución generará un 'token.pickle' tras el login.
+   # Google Earth Engine Configuration
+   GEE_PROJECT_ID=tu-proyecto-id-de-gee
 
+   # Google Drive Configuration
+   DRIVE_FOLDER_NAME=NombreDeTuCarpetaEnDrive
+
+   # Local Paths
+   RAW_DATA_PATH=data/raw/
+
+B. NIVELES DE ACCESO:
+   - GOOGLE EARTH ENGINE (GEE): 
+     Necesario para el procesamiento satelital. Ejecuta en terminal:
+     > earthengine authenticate
+
+   - GOOGLE DRIVE API (OAuth 2.0): 
+     1. Habilita 'Google Drive API' en Google Cloud Console.
+     2. Crea credenciales de tipo 'Desktop App'.
+     3. Descarga el JSON y renombralo como 'credentials.json' en la raíz.
+     * El script generará un 'token.json' automáticamente tras el primer login.
+
+C. SEGURIDAD (IMPORTANTE):
+   Asegúrate de que tu archivo '.gitignore' incluya las siguientes líneas para 
+   evitar fugas de seguridad en GitHub:
+   
+   .env
+   credentials.json
+   token.json
+   data/
 -------------------------------------------------------------------------------
 3. ESTRUCTURA DEL DATASET (VARIABLES CRÍTICAS)
 -------------------------------------------------------------------------------

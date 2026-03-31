@@ -63,11 +63,11 @@ def inicializar_gee():
 #  DESCARGA: 1 TASK POR AÑO
 # ─────────────────────────────────────────
 
-def lanzar_exports_gee():
+def lanzar_exports_gee(anios_faltantes):
     region = ee.Geometry.Rectangle(BBOX)
     tasks  = []
 
-    for anio in YEARS:
+    for anio in anios_faltantes:
         nombre    = f'ERA5_EC_{anio}'
         fecha_ini = f'{anio}-01-01'
         fecha_fin = f'{anio}-12-31'
@@ -197,26 +197,39 @@ def consolidar_a_raw_parquet(archivos_csv):
 #  ENTRY POINT
 # ─────────────────────────────────────────
 
-def procesar_raw(Descarga=True):
+def procesar_raw(forzar_descarga=False):
     preparar_entorno()
     
-    # Intentamos listar qué hay en la carpeta local primero
+    # 1. Intentar obtener archivos locales
     csv_locales = glob.glob(os.path.join(RAW_PATH, 'ERA5_EC_*.csv'))
     
-    # Lógica inteligente: Si me pides descargar O si la carpeta está vacía...
-    if Descarga or not csv_locales:
-        print("🔍 No hay archivos locales o se forzó descarga. Sincronizando con Drive...")
-        from src.utils.drive_downloader import descargar_desde_drive
+    # 2. Si no hay nada o pedimos refrescar, intentamos traer de Drive
+    if not csv_locales or forzar_descarga:
+        print("🔍 Sincronizando con Google Drive...")
         descargar_desde_drive()
-        # Volvemos a listar después de la descarga
         csv_locales = glob.glob(os.path.join(RAW_PATH, 'ERA5_EC_*.csv'))
 
-    if not csv_locales:
-        print(f"❌ Error: Ni en local ni en Drive se encontraron archivos ERA5_EC_*.csv")
-        return
+    # 3. Si después de Drive seguimos sin archivos, GEE entra al rescate
+    # IMPORTANTE: Solo lanzamos GEE para los años que FALTAN
+    anios_faltantes = [y for y in YEARS if not any(f"ERA5_EC_{y}" in f for f in csv_locales)]
+    
+    if anios_faltantes:
+        print(f"⚠️ Faltan datos para: {anios_faltantes}. Solicitando a GEE...")
+        inicializar_gee()
+        tasks = lanzar_exports_gee(anios_faltantes) # Ajustar función para recibir lista
+        monitorear_tasks(tasks)
+        
+        # Después de que GEE termine, los archivos están en DRIVE, no en LOCAL.
+        # Debemos descargar una última vez.
+        print("📥 Descargando resultados recién generados de Drive...")
+        descargar_desde_drive()
+        csv_locales = glob.glob(os.path.join(RAW_PATH, 'ERA5_EC_*.csv'))
 
-    # Si llegamos aquí, hay archivos. ¡A consolidar!
-    consolidar_a_raw_parquet(csv_locales)
+    # 4. Consolidación final
+    if csv_locales:
+        consolidar_a_raw_parquet(csv_locales)
+    else:
+        print("❌ Error crítico: No se pudieron obtener datos de ninguna fuente.")
 
 
 if __name__ == '__main__':

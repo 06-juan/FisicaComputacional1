@@ -19,9 +19,8 @@ def main():
         print("🔑 Acceso a Google Drive verificado.")
 
         # 3. Capa RAW
-        # Si Descarga=True, usará el 'service' que acabamos de crear
         print("\n--- [PASO 1: CAPA RAW] ---")
-        procesar_raw(Descarga=False) 
+        procesar_raw(forzar_descarga=False) 
 
         # 4. Capa SILVER
         print("\n--- [PASO 2: CAPA SILVER] ---")
