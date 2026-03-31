@@ -11,5 +11,6 @@ ee
 earthengine-api 
 google_auth_oauthlib
 google-api-python-client
+python-dotenv
 geemap 
 pandas

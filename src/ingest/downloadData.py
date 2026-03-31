@@ -12,14 +12,18 @@ import os
 import time
 import glob
 import duckdb
+from src.utils.drive_downloader import descargar_desde_drive
 
 # ─────────────────────────────────────────
 #  CONFIGURACIÓN CENTRAL
 # ─────────────────────────────────────────
+try:
+    GEE_PROJECT  = os.getenv('GEE_PROJECT_ID')
+    DRIVE_FOLDER = os.getenv('DRIVE_FOLDER_NAME')
+except:
+    print('revisa tu archivo .env hay problemas en tus credenciales')
 
-GEE_PROJECT  = 'ingenieriadatos1'
 RAW_PATH     = 'data/raw/'
-DRIVE_FOLDER = 'ERA5_EjeCafetero_RAW'
 SCALE_M      = 11132
 
 BBOX = [-76.1, 4.0, -75.2, 5.6]  # Eje Cafetero
@@ -155,16 +159,16 @@ def monitorear_tasks(tasks, intervalo_seg=30):
 #  CONSOLIDAR CSVs → raw.parquet
 # ─────────────────────────────────────────
 
-def consolidar_a_raw_parquet():
+def consolidar_a_raw_parquet(archivos_csv):
     parquet_final = os.path.join(RAW_PATH, 'raw.parquet')
 
     if os.path.exists(parquet_final):
         print(f"⏩ {parquet_final} ya existe. Saltando consolidación.")
         return
 
-    print(f"\n📂 {len(csv_files)} CSVs encontrados. Consolidando…")
+    print(f"\n📂 {len(archivos_csv)} CSVs encontrados. Consolidando…")
 
-    archivos_str = ', '.join([f"'{f}'" for f in csv_files])
+    archivos_str = ', '.join([f"'{f}'" for f in archivos_csv])
     con = duckdb.connect()
 
     con.execute(f"""
@@ -194,28 +198,25 @@ def consolidar_a_raw_parquet():
 # ─────────────────────────────────────────
 
 def procesar_raw(Descarga=True):
-    global csv_files
     preparar_entorno()
-    if Descarga:
-        inicializar_gee()
+    
+    # Intentamos listar qué hay en la carpeta local primero
+    csv_locales = glob.glob(os.path.join(RAW_PATH, 'ERA5_EC_*.csv'))
+    
+    # Lógica inteligente: Si me pides descargar O si la carpeta está vacía...
+    if Descarga or not csv_locales:
+        print("🔍 No hay archivos locales o se forzó descarga. Sincronizando con Drive...")
+        from src.utils.drive_downloader import descargar_desde_drive
+        descargar_desde_drive()
+        # Volvemos a listar después de la descarga
+        csv_locales = glob.glob(os.path.join(RAW_PATH, 'ERA5_EC_*.csv'))
 
-        tasks = lanzar_exports_gee()
-        monitorear_tasks(tasks, intervalo_seg=30)
-
-    csv_files = glob.glob(os.path.join(RAW_PATH, 'ERA5_EC_*.csv'))
-
-    if not csv_files:
-        print("\n" + "═"*55)
-        print("  ACCIÓN MANUAL REQUERIDA")
-        print("═"*55)
-        print(f"  1. Abre Google Drive → carpeta: {DRIVE_FOLDER}")
-        print(f"  2. Descarga todos los ERA5_EC_YYYY.csv")
-        print(f"  3. Cópialos a: {os.path.abspath(RAW_PATH)}")
-        print(f"  4. Vuelve a correr este script")
-        print("═"*55 + "\n")
+    if not csv_locales:
+        print(f"❌ Error: Ni en local ni en Drive se encontraron archivos ERA5_EC_*.csv")
         return
 
-    consolidar_a_raw_parquet()
+    # Si llegamos aquí, hay archivos. ¡A consolidar!
+    consolidar_a_raw_parquet(csv_locales)
 
 
 if __name__ == '__main__':

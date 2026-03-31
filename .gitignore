@@ -1,5 +1,9 @@
-__pycache__/
-.vscode/
-.venv/
+# Secretos de Google
+credentials.json
+token.json
+
+# Datos pesados o temporales
 data/
-test.py
+csv_cache/
+__pycache__/
+.env
