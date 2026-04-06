@@ -5,6 +5,7 @@ token.json
 # Datos pesados o temporales
 data/
 artifacts/
+logs/
 csv_cache/
 __pycache__/
 .env
