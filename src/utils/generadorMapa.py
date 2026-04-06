@@ -33,11 +33,15 @@ def generar_mapa_desde_gold():
     folium.TileLayer('CartoDB dark_matter', name="Modo Oscuro (Contraste)").add_to(m)
     folium.TileLayer('OpenStreetMap', name="Mapa Vial").add_to(m)
 
-    # 4. Renderizado de los Puntos de Oro
+    # 4. Renderizado de los Puntos
     for i, row in df.iterrows():
-        # Lógica de color basada en el Score (Gradiente de verde)
-        # Como tus scores están cerca de 35, usamos una lógica de intensidad
-        color_punto = '#27ae60' if row['score_final'] > 32 else "#e2131373"
+        # Los primeros 5 puntos (índices 0, 1, 2, 3, 4) son verdes, el resto negros
+        if i < 5:
+            color_punto = '#27ae60'  # Verde
+            opacidad = 0.9
+        else:
+            color_punto = '#000000'  # Negro
+            opacidad = 0.6 # Un poco más transparente para no saturar
         
         # HTML personalizado para el Popup (Estilo "Dashboard")
         popup_html = f"""
@@ -53,14 +57,14 @@ def generar_mapa_desde_gold():
         
         folium.CircleMarker(
             location=[row['lat'], row['lon']],
-            radius=15, # Tamaño fijo para destacar que son "puntos de interés"
+            radius=15, 
             popup=folium.Popup(popup_html, max_width=200),
             color='white',
-            weight=2,
+            weight=1,
             fill=True,
             fill_color=color_punto,
-            fill_opacity=0.8,
-            tooltip=f"Ver detalles del punto {i+1}"
+            fill_opacity=opacidad,
+            tooltip=f"Punto {i+1}"
         ).add_to(m)
 
     # 5. Guardar y finalizar
