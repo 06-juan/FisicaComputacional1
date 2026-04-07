@@ -41,11 +41,11 @@ def _detectar_columnas(con) -> dict:
 
     return {"lat": lat_col, "lon": lon_col, "fecha": fecha_col}
 
-
-def _transformar(con) -> None:
-    Path("data/silver").mkdir(parents=True, exist_ok=True)
-    Path(SILVER_PARTS).mkdir(parents=True, exist_ok=True)
-
+def _transformar_a_staging(con) -> int:
+    """
+    Crea las tablas temporales y devuelve el conteo para validación
+    SIN escribir archivos todavía.
+    """
     m = _detectar_columnas(con)
     lat, lon, fecha = m["lat"], m["lon"], m["fecha"]
 
@@ -96,57 +96,42 @@ def _transformar(con) -> None:
         FROM _silver_base
     """)
 
-    dupes = con.execute("""
-        SELECT COUNT(*) FROM (
-            SELECT pk_silver, COUNT(*) c
-            FROM silver_staging
-            GROUP BY pk_silver HAVING c > 1
-        )
-    """).fetchone()[0]
+    # Validación de duplicados (falla rápido)
+    dupes = con.execute("SELECT COUNT(*) FROM (SELECT pk_silver FROM silver_staging GROUP BY 1 HAVING COUNT(*) > 1)").fetchone()[0]
     if dupes > 0:
-        raise ValueError(f"Silver staging tiene {dupes} pk_silver duplicadas.")
+        raise ValueError(f"Detección de {dupes} PKs duplicadas en staging.")
 
-    con.execute(f"""
-        COPY silver_staging TO '{SILVER_PATH}'
-        (FORMAT PARQUET, COMPRESSION ZSTD)
-    """)
-    log.info("Silver consolidado escrito: %s", SILVER_PATH)
-
-    con.execute(f"""
-        COPY silver_staging TO '{SILVER_PARTS}'
-        (FORMAT PARQUET, COMPRESSION ZSTD,
-         PARTITION_BY (anio, mes), OVERWRITE_OR_IGNORE TRUE)
-    """)
-    log.info("Silver particionado escrito: %s", SILVER_PARTS)
-
-    con.execute("DROP TABLE IF EXISTS _silver_base")
-
+    # Retornamos el conteo de la TABLA, no del archivo en memoria
+    return con.execute("SELECT COUNT(*) FROM silver_staging").fetchone()[0]
 
 def procesar_silver() -> None:
     con = duckdb.connect()
     try:
         con.execute("BEGIN")
+        
         n_bronze = _verificar_bronze(con)
-        _transformar(con)
+        n_silver = _transformar_a_staging(con)
 
-        n_silver = con.execute(
-            f"SELECT COUNT(*) FROM read_parquet('{SILVER_PATH}')"
-        ).fetchone()[0]
-
+        # Validación de pérdida
         perdida = abs(n_bronze - n_silver) / n_bronze * 100
         if perdida > 2.0:
-            raise ValueError(f"Pérdida de filas excesiva Bronze→Silver: {perdida:.2f}%")
+            raise ValueError(f"Pérdida excesiva: {perdida:.2f}% (Umbral 2%)")
+
+        # SI PASÓ LAS PRUEBAS: Escribimos físicamente
+        Path("data/silver").mkdir(parents=True, exist_ok=True)
+        
+        con.execute(f"COPY silver_staging TO '{SILVER_PATH}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+        con.execute(f"COPY silver_staging TO '{SILVER_PARTS}' (FORMAT PARQUET, PARTITION_BY (anio, mes), OVERWRITE_OR_IGNORE TRUE)")
 
         con.execute("COMMIT")
-        log.info("✅ Silver completado. Filas: %d (pérdida: %.2f%%)", n_silver, perdida)
+        log.info("✅ Transacción exitosa. Disco actualizado. Filas: %d", n_silver)
 
     except Exception as exc:
         con.execute("ROLLBACK")
-        log.error("❌ ROLLBACK Silver — %s", exc)
+        log.error("❌ ROLLBACK ejecutado — Los archivos en disco NO fueron alterados. Error: %s", exc)
         raise
     finally:
         con.close()
-
 
 if __name__ == "__main__":
     procesar_silver()

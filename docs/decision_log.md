@@ -2,6 +2,23 @@
 
 Este documento registra las decisiones críticas tomadas durante el desarrollo del pipeline de datos (Arquitectura Medallion), su justificación física y técnica, y las soluciones a los cuellos de botella encontrados.
 
+# 06/04/2026 Juan  Jose
+---
+
+## 1. Rumbo Gold
+**Problema:** El proceso original escribía datos directamente en el disco (.parquet) antes de validar la calidad (conteo de filas, duplicados y pérdida de datos). Esto rompía la atomicidad: si la validación fallaba, el archivo en disco ya había sido sobreescrito con datos erróneos o incompletos, dejando el sistema en un estado inconsistente.
+
+**Decisión:** Implementar un área de Staging en Memoria utilizando tablas temporales de DuckDB. La escritura física a disco (COPY TO) se posterga hasta que todas las reglas de negocio y contratos de datos (pérdida < 2%, cero duplicados) se cumplan satisfactoriamente.
+
+**Justificación:** 
+- Integridad Atómica: Garantiza que el disco solo se toque si los datos son correctos. Si hay un error, el ROLLBACK limpia la memoria y mantiene los archivos anteriores intactos.
+
+- Eficiencia de E/S (I/O): Es significativamente más rápido realizar conteos (COUNT) y verificaciones de duplicados sobre una tabla en RAM que re-leer un archivo Parquet desde el almacenamiento físico.
+
+- Reducción de Latencia: Al evitar lecturas/escrituras innecesarias en caso de fallo, el pipeline falla "rápido y limpio" (fail-fast), ahorrando recursos de cómputo.
+
+
+
 # 29/03/2026 Juan  Jose
 ---
 
@@ -12,7 +29,7 @@ Este documento registra las decisiones críticas tomadas durante el desarrollo d
 
 **Justificación:** Esto nos da un rumbo a seguir.
 
-## 1. Descarga de datos
+## 2. Descarga de datos
 **Problema:** Copernico demoraba mucho.
 
 **Decisión:** Usamos GEE de google y lo guarda en Drive.
