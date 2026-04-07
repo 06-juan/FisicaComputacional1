@@ -46,13 +46,13 @@ YEARS      = list(range(2015, 2025))
 
 def preparar_entorno():
     os.makedirs(RAW_PATH, exist_ok=True)
-    print(f"📁 Directorio RAW listo: {RAW_PATH}")
+    #print(f"📁 Directorio RAW listo: {RAW_PATH}")
 
 
 def inicializar_gee():
     try:
         ee.Initialize(project=GEE_PROJECT)
-        print("✅ Google Earth Engine inicializado.")
+        #print("✅ Google Earth Engine inicializado.")
     except Exception:
         print("⚠️  GEE no autenticado. Ejecuta:")
         print("      earthengine authenticate")

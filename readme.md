@@ -70,18 +70,32 @@ C. SEGURIDAD (IMPORTANTE):
 3. ESTRUCTURA DEL DATASET (VARIABLES CRÍTICAS)
 -------------------------------------------------------------------------------
 
-CAPA BRONZE (raw.parquet):
-- temp_k:       Temperatura aire 2m (K) -> Desarrollo de plagas (Roya).
-- dew_k:        Punto de rocío (K)       -> Cálculo de Humedad Relativa.
-- lluvia_m:     Precipitación total (m)  -> Estrés hídrico y floración.
-- rad_j_m2:     Radiación solar (J/m2)   -> Fotosíntesis y secado.
-- evap_pot_m:   Evaporación potencial(m) -> Balance hídrico del suelo.
+### 1. Capa BRONZE (raw.parquet)
+Datos crudos con unidades del Sistema Internacional.
+- **temp_k:** Temperatura aire 2m (K) -> Monitoreo de Roya.
+- **dew_k:** Punto de rocío (K) -> Cálculo de Humedad Relativa.
+- **lluvia_m:** Precipitación total (m) -> Estrés hídrico.
+- **rad_j_m2:** Radiación solar (J/m2) -> Fotosíntesis.
+- **evap_pot_m:** Evaporación potencial (m) -> Balance hídrico.
 
-CAPA SILVER (clima_cafe_silver.parquet):
-- temp_c:       temp_k - 273.15          -> Grados Celsius.
-- rh_pct:       Basado en temp y dew     -> % Humedad Relativa.
-- rain_mm:      lluvia_m * 1000          -> Milímetros de lluvia.
-- rad_mj_m2:    rad_j_m2 / 1,000,000     -> MegaJoules/m2.
+### 2. Capa SILVER (clima_cafe_silver.parquet)
+Limpieza, tipado y normalización de unidades.
+- **temp_c:** `temp_k - 273.15` (Grados Celsius).
+- **rh_pct:** Humedad Relativa (%) basada en fórmula de August-Roche-Magnus.
+- **rain_mm:** `lluvia_m * 1000` (Milímetros).
+- **rad_mj_m2:** `rad_j_m2 / 1,000,000` (MegaJoules/m2).
+- **evap_pot_mm:** `evap_pot_m * 1000` (Milímetros).
+- **Validación:** Transacción ACID con Rollback si la pérdida de datos > 2%.
+
+### 3. Capa GOLD (Ranking y Estacionalidad)
+Agregaciones de negocio para selección de sitios óptimos.
+- **Score de Confort Cafetero:** Evaluación diaria basada en:
+    - Temp: 17°C - 23°C
+    - Humedad: 70% - 85%
+    - Lluvia: >= 3.0 mm
+    - Radiación: >= 10.0 MJ/m2
+- **Ranking:** Clasificación de puntos por `% de días óptimos`.
+- **Estacionalidad:** Análisis mensual de variabilidad y confort.
 
 -------------------------------------------------------------------------------
 4. EJECUCIÓN DEL PIPELINE

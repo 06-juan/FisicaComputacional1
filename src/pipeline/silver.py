@@ -121,7 +121,9 @@ def procesar_silver() -> None:
         # SI PASÓ LAS PRUEBAS: Escribimos físicamente
         Path("data/silver").mkdir(parents=True, exist_ok=True)
         
+        # Archivo completo
         con.execute(f"COPY silver_staging TO '{SILVER_PATH}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+        # Particiones
         con.execute(f"COPY silver_staging TO '{SILVER_PARTS}' (FORMAT PARQUET, PARTITION_BY (anio, mes), OVERWRITE_OR_IGNORE TRUE)")
 
         con.execute("COMMIT")
