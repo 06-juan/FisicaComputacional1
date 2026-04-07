@@ -10,6 +10,8 @@ Uso:
 import duckdb
 import logging
 from pathlib import Path
+from src.utils.dbconect import conectar_bd, desconectar_bd
+
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -22,7 +24,7 @@ def agregar_uuid_a_bronze() -> None:
     if not Path(BRONZE_PATH).exists():
         raise FileNotFoundError(f"No se encontró: {BRONZE_PATH}")
 
-    con = duckdb.connect()
+    con = conectar_bd()
     try:
         # Verificar si ya tiene row_id
         cols = [r[0] for r in con.execute(
@@ -85,7 +87,7 @@ def agregar_uuid_a_bronze() -> None:
         log.error("❌ Fallo al inyectar UUID: %s", exc)
         raise
     finally:
-        con.close()
+        desconectar_bd(con)
 
 
 if __name__ == "__main__":

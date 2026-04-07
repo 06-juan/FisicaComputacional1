@@ -6,6 +6,7 @@ Lee desde Silver (que ya tiene columnas lat/lon normalizadas)
 import duckdb
 import logging
 from pathlib import Path
+from src.utils.dbconect import conectar_bd, desconectar_bd
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
@@ -172,7 +173,7 @@ def _exportar_a_csv(con):
     """)
 
 def procesar_gold() -> None:
-    con = duckdb.connect()
+    con = conectar_bd()
     try:
         con.execute("BEGIN")
         _verificar_silver(con)
@@ -187,7 +188,7 @@ def procesar_gold() -> None:
         log.error("❌ ROLLBACK Gold — %s", exc)
         raise
     finally:
-        con.close()
+        desconectar_bd(con)
 
 
 if __name__ == "__main__":

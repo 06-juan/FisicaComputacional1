@@ -13,6 +13,7 @@ import time
 import glob
 import duckdb
 from src.utils.drive_downloader import descargar_desde_drive
+from src.utils.dbconect import conectar_bd, desconectar_bd
 
 # ─────────────────────────────────────────
 #  CONFIGURACIÓN CENTRAL
@@ -169,7 +170,7 @@ def consolidar_a_bronze_parquet(archivos_csv):
     print(f"\n📂 {len(archivos_csv)} CSVs encontrados. Consolidando…")
 
     archivos_str = ', '.join([f"'{f}'" for f in archivos_csv])
-    con = duckdb.connect()
+    con = conectar_bd()
 
     con.execute(f"""
         COPY (
@@ -191,6 +192,8 @@ def consolidar_a_bronze_parquet(archivos_csv):
 
     n = con.execute(f"SELECT COUNT(*) FROM '{parquet_final}'").fetchone()[0]
     print(f"✅ bronze.parquet listo: {n:,} registros → {parquet_final}")
+
+    desconectar_bd(con)
 
 
 # ─────────────────────────────────────────

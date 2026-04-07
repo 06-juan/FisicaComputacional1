@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-load_dotenv()  # DEBE ir antes de cualquier import de src
+load_dotenv()
 
 from src.utils.logger import PipelineLogger
 from src.utils.GoogleAutenticator import autenticar_drive
@@ -11,9 +11,13 @@ from src.utils.generadorMapa import generar_mapa_desde_gold
 from src.utils.data_contracts import aplicar_contratos
 from src.utils.validate import validar_pipeline
 from src.utils.uuid_patch import agregar_uuid_a_bronze
+from src.utils.dbconect import conectar_bd, desconectar_bd
 
 def main():
     logger = PipelineLogger()
+
+    if os.path.exists("data/pipeline.duckdb"):
+        os.remove("data/pipeline.duckdb")
     
     try:
         # 1. Autenticación

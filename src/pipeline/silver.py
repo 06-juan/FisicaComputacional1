@@ -6,6 +6,8 @@ Nombres reales del parquet Bronze: latitud, longitud (no lat/lon)
 import duckdb
 import logging
 from pathlib import Path
+from src.utils.dbconect import conectar_bd, desconectar_bd
+
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
@@ -107,7 +109,7 @@ def _transformar_a_staging(con) -> int:
     return con.execute("SELECT COUNT(*) FROM silver_staging").fetchone()[0]
 
 def procesar_silver() -> None:
-    con = duckdb.connect()
+    con = conectar_bd()
     try:
         con.execute("BEGIN")
         
@@ -135,7 +137,7 @@ def procesar_silver() -> None:
         log.error("❌ ROLLBACK ejecutado — Los archivos en disco NO fueron alterados. Error: %s", exc)
         raise
     finally:
-        con.close()
+        desconectar_bd(con)
 
 if __name__ == "__main__":
     procesar_silver()

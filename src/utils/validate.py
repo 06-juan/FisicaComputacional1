@@ -7,6 +7,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
+from src.utils.dbconect import conectar_bd, desconectar_bd
+
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -162,7 +164,7 @@ class ValidadorPipeline:
 
     # ── EJECUTAR TODOS ────────────────────────────────────────────
     def ejecutar(self) -> bool:
-        con = duckdb.connect()
+        con = conectar_bd()
         try:
             self.check_row_counts(con)
             self.check_pk_unicidad(con)
@@ -170,7 +172,7 @@ class ValidadorPipeline:
             self.check_row_consistency(con)
             self.check_rangos_fisicos(con)
         finally:
-            con.close()
+            desconectar_bd(con)
         return self.resumen()
 
     def resumen(self) -> bool:

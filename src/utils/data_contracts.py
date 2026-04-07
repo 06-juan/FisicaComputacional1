@@ -6,6 +6,7 @@ Capa BRONZE / SILVER / GOLD
 import duckdb
 import logging
 from pathlib import Path
+from src.utils.dbconect import conectar_bd, desconectar_bd
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -82,30 +83,41 @@ CREATE TABLE IF NOT EXISTS gold_estacionalidad (
 
 
 def aplicar_contratos(db_path: str = "data/pipeline.duckdb") -> None:
-    """
-    Crea las tablas con sus contratos en DuckDB.
-    Idempotente: usa CREATE TABLE IF NOT EXISTS.
-    """
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(db_path)
+    
+    # Usamos tu función de conexión para mantener la abstracción
+    con = conectar_bd(db_path) 
+    if not con:
+        return
+
     try:
-        con.execute("BEGIN")
-        for nombre, ddl in [
-            ("bronze_clima",        BRONZE_SCHEMA),
-            ("silver_clima",        SILVER_SCHEMA),
-            ("gold_ranking",        GOLD_RANKING_SCHEMA),
+        # DuckDB permite transacciones explícitas, pero hay que ser precavidos
+        con.begin() 
+        
+        schemas = [
+            ("bronze_clima", BRONZE_SCHEMA),
+            ("silver_clima", SILVER_SCHEMA),
+            ("gold_ranking", GOLD_RANKING_SCHEMA),
             ("gold_estacionalidad", GOLD_ESTACIONAL_SCHEMA),
-        ]:
+        ]
+
+        for nombre, ddl in schemas:
             con.execute(ddl)
-            log.info("Contrato aplicado: %s", nombre)
-        con.execute("COMMIT")
-        log.info("Todos los contratos aplicados correctamente.")
+            log.info(f"Contrato verificado/aplicado: {nombre}")
+
+        con.commit()
+        log.info("Éxito: Estado de la base de datos sincronizado.")
+
     except Exception as exc:
-        con.execute("ROLLBACK")
-        log.error("ROLLBACK — fallo al aplicar contratos: %s", exc)
+        # Solo intentamos rollback si la conexión sigue viva
+        try:
+            con.rollback()
+        except:
+            pass 
+        log.error(f"Fallo crítico. Se intentó revertir cambios: {exc}")
         raise
     finally:
-        con.close()
+        desconectar_bd(con)
 
 
 if __name__ == "__main__":
