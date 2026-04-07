@@ -79,6 +79,7 @@ def _transformar_a_staging(con) -> int:
     con.execute("""
         CREATE OR REPLACE TABLE silver_staging AS
         SELECT
+            row_id AS bronze_id,
             CONCAT(CAST(_fecha AS VARCHAR), '|',
                    CAST(_lat   AS VARCHAR), '|',
                    CAST(_lon   AS VARCHAR))  AS pk_silver,

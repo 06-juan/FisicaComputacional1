@@ -10,6 +10,7 @@ from src.pipeline.gold import procesar_gold
 from src.utils.generadorMapa import generar_mapa_desde_gold
 from src.utils.data_contracts import aplicar_contratos
 from src.utils.validate import validar_pipeline
+from src.utils.uuid_patch import agregar_uuid_a_bronze
 
 def main():
     logger = PipelineLogger()
@@ -27,6 +28,7 @@ def main():
         # 3. Capa RAW
         with logger.step("Procesando capa RAW"):
             procesar_raw(forzar_descarga=False)
+            agregar_uuid_a_bronze()
 
         # 4. Capa SILVER
         with logger.step("Procesando capa SILVER"):
