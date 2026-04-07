@@ -93,7 +93,7 @@ El dataset Gold debe calcular el score diario basado en los siguientes pesos:
   fuga de credenciales climáticas.
 
 ### 8.2 ALMACENAMIENTO FÍSICO LOCAL
-- data/raw/: Archivos CSV/ZIP temporales (Bronze).
+- data/bronze/: Archivos CSV/ZIP temporales (Bronze).
 - data/silver/: Parquet limpio y transformado (Single Source of Truth).
 - data/gold/: Parquet con rankings y estacionalidad (Business Ready).
 ===============================================================================

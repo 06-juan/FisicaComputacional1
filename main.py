@@ -4,7 +4,7 @@ load_dotenv()  # DEBE ir antes de cualquier import de src
 
 from src.utils.logger import PipelineLogger
 from src.utils.GoogleAutenticator import autenticar_drive
-from src.ingest.downloadData import procesar_raw
+from src.ingest.downloadData import procesar_bronze
 from src.pipeline.silver import procesar_silver
 from src.pipeline.gold import procesar_gold
 from src.utils.generadorMapa import generar_mapa_desde_gold
@@ -25,9 +25,9 @@ def main():
         with logger.step("Aplicando contratos de datos"):
             aplicar_contratos()
 
-        # 3. Capa RAW
-        with logger.step("Procesando capa RAW"):
-            procesar_raw(forzar_descarga=False)
+        # 3. Capa bronze
+        with logger.step("Procesando capa bronze"):
+            procesar_bronze(forzar_descarga=False)
             agregar_uuid_a_bronze()
 
         # 4. Capa SILVER

@@ -7,8 +7,8 @@ from src.utils.GoogleAutenticator import autenticar_drive
 def descargar_desde_drive():
     # Cargamos configuración desde el entorno
     folder_name = os.getenv('DRIVE_FOLDER_NAME')
-    raw_path = Path('data/raw')
-    raw_path.mkdir(parents=True, exist_ok=True)
+    bronze_path = Path('data/bronze')
+    bronze_path.mkdir(parents=True, exist_ok=True)
 
     service = autenticar_drive()
     
@@ -31,7 +31,7 @@ def descargar_desde_drive():
     print(f"📥 Sincronizando {len(csvs)} archivos desde Drive...")
 
     for f in csvs:
-        destino = raw_path / f['name']
+        destino = bronze_path / f['name']
         if destino.exists():
             continue
         

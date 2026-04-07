@@ -188,7 +188,7 @@ class ValidadorPipeline:
 
 
 def validar_pipeline(
-    bronze          = "data/raw/raw.parquet",
+    bronze          = "data/bronze/bronze.parquet",
     silver          = "data/silver/clima_cafe_silver.parquet",
     gold_ranking    = "data/gold/ranking_puntos.parquet",
     gold_estacional = "data/gold/estacionalidad_mensual.parquet",

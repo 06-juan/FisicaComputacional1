@@ -1,7 +1,7 @@
 """
-Parche UUID para raw.parquet — Bronze layer
+Parche UUID para bronze.parquet — Bronze layer
 Agrega la columna row_id (UUID v4) como surrogate key al parquet existente.
-Ejecutar UNA sola vez sobre el raw.parquet ya generado.
+Ejecutar UNA sola vez sobre el bronze.parquet ya generado.
 
 Uso:
     python -m src.ingest.uuid_patch
@@ -14,8 +14,8 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 log = logging.getLogger(__name__)
 
-BRONZE_PATH = "data/raw/raw.parquet"
-BRONZE_TMP  = "data/raw/raw_with_uuid.parquet"
+BRONZE_PATH = "data/bronze/bronze.parquet"
+BRONZE_TMP  = "data/bronze/bronze_with_uuid.parquet"
 
 
 def agregar_uuid_a_bronze() -> None:

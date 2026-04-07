@@ -1,6 +1,6 @@
 """
 Contratos de Datos — Arquitectura Medallón
-Capa RAW / BRONZE / SILVER / GOLD
+Capa BRONZE / SILVER / GOLD
 """
 
 import duckdb

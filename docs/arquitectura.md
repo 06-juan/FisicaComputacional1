@@ -14,10 +14,7 @@ GEE (ERA5-Land)
 Google Drive
      │  sincronización automática
      ▼
-[RAW] data/raw/                ← CSVs por año, sin tocar
-     │  consolidación DuckDB → ZSTD Parquet
-     ▼
-[BRONZE] data/raw/raw.parquet  ← ingesta cruda + row_id UUID
+[BRONZE] data/bronze/bronze.parquet  ← ingesta cruda + row_id UUID
      │  conversiones físicas, filtros, RH%
      ▼
 [SILVER] data/silver/          ← clima_cafe_silver.parquet
@@ -36,7 +33,7 @@ mapa_interactivo.html
 
 ## Contratos de datos por capa
 
-### BRONZE — `raw.parquet`
+### BRONZE — `bronze.parquet`
 
 | Columna      | Tipo    | Restricción                  | Descripción                          |
 |--------------|---------|------------------------------|--------------------------------------|
@@ -142,8 +139,8 @@ FisicaComputacional1/
 │       ├── GoogleAutenticator.py
 │       └── generadorMapa.py
 └── data/                         # Ignorado en .gitignore
-    ├── raw/
-    │   ├── raw.parquet           # Bronze consolidado
+    ├── bronze/
+    │   ├── bronze.parquet           # Bronze consolidado
     │   └── [CSVs por año]
     ├── silver/
     │   ├── clima_cafe_silver.parquet

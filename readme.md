@@ -10,20 +10,18 @@ resolución de ERA5-Land vía Google Earth Engine (GEE).
 
 El flujo de datos se ha automatizado mediante una lógica de cascada inteligente:
 
-A. CAPA RAW (Cloud & Drive): 
+A. CAPA BRONZE (Ingesta Local): 
    Exportación asíncrona de fragmentos anuales desde GEE a Google Drive en 
    formato CSV. Monitoreo de tareas en tiempo real desde el script local.
-
-B. CAPA BRONZE (Ingesta Local): 
-   Sincronización automática Drive -> Local ('data/raw/'). Se utiliza DuckDB 
+   Sincronización automática Drive -> Local ('data/bronze/'). Se utiliza DuckDB 
    para realizar una consolidación masiva de múltiples archivos CSV en un único 
-   'raw.parquet' optimizado con compresión ZSTD.
+   'bronze.parquet' optimizado con compresión ZSTD.
 
-C. CAPA SILVER (Transformación): 
+B. CAPA SILVER (Transformación): 
    Limpieza, conversión de unidades físicas y cálculo de variables derivadas 
    (Humedad Relativa, Radiación en MJ/m2) necesarias para modelos agronómicos.
 
-D. CAPA GOLD (Analítica): 
+C. CAPA GOLD (Analítica): 
    Agregaciones espaciales (BBOX Eje Cafetero) y temporales para indicadores 
    de calidad y fenología del café.
 
@@ -45,7 +43,7 @@ A. CREACIÓN DEL ARCHIVO .ENV:
    DRIVE_FOLDER_NAME=NombreDeTuCarpetaEnDrive
 
    # Local Paths
-   RAW_DATA_PATH=data/raw/
+   BRONZE_DATA_PATH=data/bronze/
 
 B. NIVELES DE ACCESO:
    - GOOGLE EARTH ENGINE (GEE): 
@@ -70,7 +68,7 @@ C. SEGURIDAD (IMPORTANTE):
 3. ESTRUCTURA DEL DATASET (VARIABLES CRÍTICAS)
 -------------------------------------------------------------------------------
 
-### 1. Capa BRONZE (raw.parquet)
+### 1. Capa BRONZE (bronze.parquet)
 Datos crudos con unidades del Sistema Internacional.
 - **temp_k:** Temperatura aire 2m (K) -> Monitoreo de Roya.
 - **dew_k:** Punto de rocío (K) -> Cálculo de Humedad Relativa.

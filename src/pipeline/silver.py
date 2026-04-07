@@ -10,7 +10,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 
-BRONZE_PATH  = "data/raw/raw.parquet"
+BRONZE_PATH  = "data/bronze/bronze.parquet"
 SILVER_PATH  = "data/silver/clima_cafe_silver.parquet"
 SILVER_PARTS = "data/silver/partitioned/"
 

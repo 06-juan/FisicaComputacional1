@@ -7,8 +7,8 @@ def project_root() -> Path:
 def data_dir() -> Path:
     return project_root() / "data"
 
-def raw_dir() -> Path:
-    return data_dir() / "raw"
+def bronze_dir() -> Path:
+    return data_dir() / "bronze"
 
 def silver_dir() -> Path:
     return data_dir() / "silver"

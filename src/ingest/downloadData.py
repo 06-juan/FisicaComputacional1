@@ -1,7 +1,7 @@
 # src/ingest/downloadData.py
 """
-Capa RAW — Descarga ERA5-Land via Google Earth Engine
-Pipeline: GEE → Google Drive → data/raw/*.csv → data/raw/raw.parquet
+Capa bronze — Descarga ERA5-Land via Google Earth Engine
+Pipeline: GEE → Google Drive → data/bronze/*.csv → data/bronze/bronze.parquet
 
 Partición anual — el Eje Cafetero tiene ~8 píxeles/día,
 ~2,900 features/año: GEE lo resuelve en ~4 segundos por task.
@@ -23,7 +23,7 @@ try:
 except:
     print('revisa tu archivo .env hay problemas en tus credenciales')
 
-RAW_PATH     = 'data/raw/'
+BRONZE_PATH     = 'data/bronze/'
 SCALE_M      = 11132
 
 BBOX = [-76.1, 4.0, -75.2, 5.6]  # Eje Cafetero
@@ -45,8 +45,8 @@ YEARS      = list(range(2015, 2025))
 # ─────────────────────────────────────────
 
 def preparar_entorno():
-    os.makedirs(RAW_PATH, exist_ok=True)
-    #print(f"📁 Directorio RAW listo: {RAW_PATH}")
+    os.makedirs(BRONZE_PATH, exist_ok=True)
+    #print(f"📁 Directorio BRONZE listo: {BRONZE_PATH}")
 
 
 def inicializar_gee():
@@ -71,7 +71,7 @@ def lanzar_exports_gee(anios_faltantes):
         nombre    = f'ERA5_EC_{anio}'
         fecha_ini = f'{anio}-01-01'
         fecha_fin = f'{anio}-12-31'
-        patron    = os.path.join(RAW_PATH, f'{nombre}*.csv')
+        patron    = os.path.join(BRONZE_PATH, f'{nombre}*.csv')
 
         if glob.glob(patron):
             print(f"⏩ Ya existe {nombre}.csv — saltando.")
@@ -156,11 +156,11 @@ def monitorear_tasks(tasks, intervalo_seg=30):
 
 
 # ─────────────────────────────────────────
-#  CONSOLIDAR CSVs → raw.parquet
+#  CONSOLIDAR CSVs → bronze.parquet
 # ─────────────────────────────────────────
 
-def consolidar_a_raw_parquet(archivos_csv):
-    parquet_final = os.path.join(RAW_PATH, 'raw.parquet')
+def consolidar_a_bronze_parquet(archivos_csv):
+    parquet_final = os.path.join(BRONZE_PATH, 'bronze.parquet')
 
     if os.path.exists(parquet_final):
         print(f"⏩ {parquet_final} ya existe. Saltando consolidación.")
@@ -190,24 +190,24 @@ def consolidar_a_raw_parquet(archivos_csv):
     """)
 
     n = con.execute(f"SELECT COUNT(*) FROM '{parquet_final}'").fetchone()[0]
-    print(f"✅ raw.parquet listo: {n:,} registros → {parquet_final}")
+    print(f"✅ bronze.parquet listo: {n:,} registros → {parquet_final}")
 
 
 # ─────────────────────────────────────────
 #  ENTRY POINT
 # ─────────────────────────────────────────
 
-def procesar_raw(forzar_descarga=False):
+def procesar_bronze(forzar_descarga=False):
     preparar_entorno()
     
     # 1. Intentar obtener archivos locales
-    csv_locales = glob.glob(os.path.join(RAW_PATH, 'ERA5_EC_*.csv'))
+    csv_locales = glob.glob(os.path.join(BRONZE_PATH, 'ERA5_EC_*.csv'))
     
     # 2. Si no hay nada o pedimos refrescar, intentamos traer de Drive
     if not csv_locales or forzar_descarga:
         print("🔍 Sincronizando con Google Drive...")
         descargar_desde_drive()
-        csv_locales = glob.glob(os.path.join(RAW_PATH, 'ERA5_EC_*.csv'))
+        csv_locales = glob.glob(os.path.join(BRONZE_PATH, 'ERA5_EC_*.csv'))
 
     # 3. Si después de Drive seguimos sin archivos, GEE entra al rescate
     # IMPORTANTE: Solo lanzamos GEE para los años que FALTAN
@@ -223,14 +223,14 @@ def procesar_raw(forzar_descarga=False):
         # Debemos descargar una última vez.
         print("📥 Descargando resultados recién generados de Drive...")
         descargar_desde_drive()
-        csv_locales = glob.glob(os.path.join(RAW_PATH, 'ERA5_EC_*.csv'))
+        csv_locales = glob.glob(os.path.join(BRONZE_PATH, 'ERA5_EC_*.csv'))
 
     # 4. Consolidación final
     if csv_locales:
-        consolidar_a_raw_parquet(csv_locales)
+        consolidar_a_bronze_parquet(csv_locales)
     else:
         print("❌ Error crítico: No se pudieron obtener datos de ninguna fuente.")
 
 
 if __name__ == '__main__':
-    procesar_raw()
+    procesar_bronze()
