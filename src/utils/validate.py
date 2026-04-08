@@ -89,7 +89,7 @@ class ValidadorPipeline:
         for etiqueta, path, pk_col in [
             ("SILVER",   self.silver,  "pk_silver"),
             ("GOLD_RK",  self.g_rank,  "pk_gold"),
-            ("GOLD_ES",  self.g_estac, "pk_estacional"),
+            ("GOLD_ES",  self.g_estac, "pk_estacional_mes"),
         ]:
             if not Path(path).exists():
                 continue

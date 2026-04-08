@@ -2,10 +2,21 @@
 
 Este documento registra las decisiones críticas tomadas durante el desarrollo del pipeline de datos (Arquitectura Medallion), su justificación física y técnica, y las soluciones a los cuellos de botella encontrados.
 
+# 08/04/2026 Juan  Jose
+---
+
+## 1. Cambio vista de gold
+**Problema:** La vista a gold de estacionalidad_mensual agrupaba por mes, latitud y longitud dando como resultado muchas lineas
+
+**Decisión:** agrupar en esta vista por mes y comparar los meses entre si  sin distinguir entre latitud y longitud
+
+**Justificación:** pasamos de cientos de filas a solo 12 una por mes y comparar asi como se comporta el café en estos meses
+
+
 # 06/04/2026 Juan  Jose
 ---
 
-## 1. Rumbo Gold
+## 1. Cambio de estructura Silver
 **Problema:** El proceso original escribía datos directamente en el disco (.parquet) antes de validar la calidad (conteo de filas, duplicados y pérdida de datos). Esto rompía la atomicidad: si la validación fallaba, el archivo en disco ya había sido sobreescrito con datos erróneos o incompletos, dejando el sistema en un estado inconsistente.
 
 **Decisión:** Implementar un área de Staging en Memoria utilizando tablas temporales de DuckDB. La escritura física a disco (COPY TO) se posterga hasta que todas las reglas de negocio y contratos de datos (pérdida < 2%, cero duplicados) se cumplan satisfactoriamente.
@@ -16,7 +27,6 @@ Este documento registra las decisiones críticas tomadas durante el desarrollo d
 - Eficiencia de E/S (I/O): Es significativamente más rápido realizar conteos (COUNT) y verificaciones de duplicados sobre una tabla en RAM que re-leer un archivo Parquet desde el almacenamiento físico.
 
 - Reducción de Latencia: Al evitar lecturas/escrituras innecesarias en caso de fallo, el pipeline falla "rápido y limpio" (fail-fast), ahorrando recursos de cómputo.
-
 
 
 # 29/03/2026 Juan  Jose

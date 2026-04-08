@@ -97,12 +97,7 @@ def _construir_estacionalidad(con) -> None:
     con.execute(f"""
         CREATE OR REPLACE TABLE gold_estac_staging AS
         SELECT
-            CONCAT(CAST(mes AS VARCHAR), '|',
-                   CAST(ROUND(lat,6) AS VARCHAR), '|',
-                   CAST(ROUND(lon,6) AS VARCHAR))              AS pk_estacional,
-            mes,
-            ROUND(lat, 6)                                      AS lat,
-            ROUND(lon, 6)                                      AS lon,
+            mes                                                AS pk_estacional_mes,
             ROUND(AVG(
                 (CASE WHEN temp_c   BETWEEN {TEMP_MIN_OPT} AND {TEMP_MAX_OPT} THEN 25 ELSE 0 END) +
                 (CASE WHEN rh_pct   BETWEEN {RH_MIN_OPT}   AND {RH_MAX_OPT}   THEN 25 ELSE 0 END) +
@@ -116,26 +111,27 @@ def _construir_estacionalidad(con) -> None:
                 (CASE WHEN rad_mj_m2 >= {RAD_MIN_OPT}                           THEN 25 ELSE 0 END)
             ), 2)                                              AS variabilidad_score,
             ROUND(
-                SUM(CASE
-                    WHEN temp_c   BETWEEN {TEMP_MIN_OPT} AND {TEMP_MAX_OPT}
-                     AND rh_pct   BETWEEN {RH_MIN_OPT}   AND {RH_MAX_OPT}
-                     AND rain_mm  >= {RAIN_MIN_OPT}
-                     AND rad_mj_m2 >= {RAD_MIN_OPT}
-                    THEN 1.0 ELSE 0.0 END
-                ) * 100.0 / NULLIF(COUNT(*), 0), 2)            AS confort_pct,
+                SUM(CASE 
+                    WHEN (
+                        (CASE WHEN temp_c   BETWEEN {TEMP_MIN_OPT} AND {TEMP_MAX_OPT} THEN 25 ELSE 0 END) +
+                        (CASE WHEN rh_pct   BETWEEN {RH_MIN_OPT}   AND {RH_MAX_OPT}   THEN 25 ELSE 0 END) +
+                        (CASE WHEN rain_mm  >= {RAIN_MIN_OPT}                          THEN 25 ELSE 0 END) +
+                        (CASE WHEN rad_mj_m2 >= {RAD_MIN_OPT}                         THEN 25 ELSE 0 END)
+                    ) >= 75 THEN 1.0 ELSE 0.0 END) * 100.0 / NULLIF(COUNT(*), 0), 2
+            )                                                  AS confort_pct,
             current_timestamp                                  AS aggregated_at
         FROM read_parquet('{SILVER_PATH}')
         WHERE lat BETWEEN {LAT_MIN} AND {LAT_MAX}
           AND lon BETWEEN {LON_MIN} AND {LON_MAX}
-        GROUP BY mes, ROUND(lat,6), ROUND(lon,6)
+        GROUP BY mes
         ORDER BY confort_pct DESC
     """)
 
     dupes = con.execute("""
         SELECT COUNT(*) FROM (
-            SELECT pk_estacional, COUNT(*) c
+            SELECT pk_estacional_mes, COUNT(*) c
             FROM gold_estac_staging
-            GROUP BY pk_estacional HAVING c > 1
+            GROUP BY pk_estacional_mes HAVING c > 1
         )
     """).fetchone()[0]
     if dupes:
@@ -148,7 +144,7 @@ def _construir_estacionalidad(con) -> None:
     con.execute(f"""
         COPY gold_estac_staging TO '{GOLD_ESTAC_PARTS}'
         (FORMAT PARQUET, COMPRESSION ZSTD,
-         PARTITION_BY (mes), OVERWRITE_OR_IGNORE TRUE)
+         PARTITION_BY (pk_estacional_mes), OVERWRITE_OR_IGNORE TRUE)
     """)
     log.info("Gold estacionalidad escrita: %s", GOLD_ESTACIONAL)
 
