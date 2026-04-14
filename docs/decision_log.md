@@ -29,25 +29,7 @@ Este documento registra las decisiones críticas tomadas durante el desarrollo d
 - Reducción de Latencia: Al evitar lecturas/escrituras innecesarias en caso de fallo, el pipeline falla "rápido y limpio" (fail-fast), ahorrando recursos de cómputo.
 
 
-# 29/03/2026 Juan  Jose
----
-
-## 1. Rumbo Gold
-**Problema:** No teniamos una pregunta a responder
-
-**Decisión:** Buscar cuales son los mejores lugares en el eje cafetero para sembrar café segun el clima y la fisiologia de la planta de café
-
-**Justificación:** Esto nos da un rumbo a seguir.
-
-## 2. Descarga de datos
-**Problema:** Copernico demoraba mucho.
-
-**Decisión:** Usamos GEE de google y lo guarda en Drive.
-
-**Justificación:** Es mucho mas rapido.
-
-
-# 28/03/2026 Juan  Jose
+# 28/03/2026 Juan  Jose/Juan Esteban
 ---
 
 ## 1. Gestión de Ingesta: Descarga por Lotes (Batching)
@@ -98,4 +80,106 @@ Este documento registra las decisiones críticas tomadas durante el desarrollo d
 
 **Decisión:** se implementó una regla de integridad en la capa Gold que descarta cualquier unidad espacial-temporal que no cuente con el par de mediciones día/noche (00h y 12h local).
 
-**Justificación:** ($\Delta T = 0$ por falta de muestras), 
+**Justificación:** ($\Delta T = 0$ por falta de muestras) es un valor inválido para la amplitud térmica, y su inclusión distorsionaría los KPIs de estrés térmico. Esta regla garantiza que solo se consideren días completos con datos confiables, mejorando la calidad del análisis climático.
+
+## 6. Orquestación del Pipeline: Integración de CLI con Logging Estructurado
+
+Problema: La nueva versión del main.py (refactorizada con argparse) mejoró la flexibilidad del pipeline, pero eliminó el uso del PipelineLogger, perdiendo trazabilidad estructurada en Markdown.
+
+Decisión:
+
+Integrar el sistema de argumentos (argparse) con el PipelineLogger.
+Reemplazar todos los print() y logging por métodos del logger (info, success, error).
+Encapsular cada etapa del pipeline dentro de with logger.step(...).
+
+Justificación:
+Se preserva la flexibilidad operacional (ejecución parcial, flags, debug), sin sacrificar la observabilidad del sistema.
+El uso de context managers garantiza:
+
+Medición automática de tiempos
+Logs estructurados en Markdown
+Auditoría reproducible de cada ejecución
+
+Esto transforma el pipeline en un sistema trazable y mantenible en entornos productivos.
+
+## 7. Eliminación de Logging Global (Conflicto de Handlers)
+
+Problema: El uso simultáneo de logging.basicConfig() y PipelineLogger generaba duplicación de mensajes y pérdida de control sobre el formato de salida.
+
+Decisión:
+
+Eliminar completamente el uso de logging global en el main.py.
+Centralizar todo el sistema de logs en PipelineLogger.
+
+Justificación:
+Desde el diseño de software, múltiples fuentes de logging generan inconsistencia y ruido.
+Al centralizar:
+
+Se evita duplicidad de handlers
+Se garantiza formato uniforme (Markdown)
+Se mantiene aislamiento del sistema de logging
+
+Esto sigue el principio de Single Responsibility aplicado a observabilidad.
+
+## 8. Diseño de Pipeline Idempotente por Etapas (Control con Flags)
+
+Problema: La ejecución completa del pipeline era obligatoria, dificultando debugging, testing y reprocesamiento parcial.
+
+Decisión:
+
+Implementar control de flujo mediante flags:
+--desde raw | silver | gold
+--solo validar
+--sin-mapa
+--forzar-descarga
+--explain
+
+Justificación:
+Permite ejecutar el pipeline de forma modular e incremental, lo cual es clave en sistemas de datos reales.
+
+Desde la ingeniería de datos:
+
+Reduce tiempos de iteración
+Permite debugging localizado
+Evita recomputación innecesaria
+
+Esto convierte el pipeline en un sistema operable y escalable.
+
+## 9. Instrumentación del Pipeline: Medición de Tiempos por Etapa
+
+Problema: No existía visibilidad clara sobre el rendimiento de cada etapa del pipeline.
+
+Decisión:
+
+Utilizar logger.step() como mecanismo estándar para instrumentar tiempos.
+
+Justificación:
+Cada bloque ahora actúa como una unidad de medición:
+
+Permite detectar cuellos de botella
+Facilita optimización futura
+Genera métricas directamente en el log
+
+Esto introduce una capa de observabilidad temporal, clave en pipelines ETL.
+
+## 10. Generación de Logs como Artefactos de Auditoría
+
+Problema: No existía un registro persistente y legible de ejecuciones del pipeline.
+
+Decisión:
+
+Generar logs en formato Markdown (.md) versionables.
+Guardarlos en carpeta logs/ con timestamp único.
+
+Justificación:
+El log deja de ser solo debugging y pasa a ser:
+
+Evidencia de ejecución
+Registro histórico
+Documento técnico auditable
+
+Esto alinea el proyecto con prácticas de:
+
+Data Governance
+Reproducibilidad científica
+Trazabilidad en pipelines de datos

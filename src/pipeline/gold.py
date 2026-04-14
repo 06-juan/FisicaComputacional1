@@ -1,6 +1,12 @@
 """
 Capa GOLD — Agregaciones con contratos, PK compuesta y transacciones
-Lee desde Silver (que ya tiene columnas lat/lon normalizadas)
+Lee desde Silver (columnas lat/lon normalizadas)
+
+Tablas producidas:
+  1. ranking_puntos.parquet         — score anual por punto (lat/lon)
+  2. estacionalidad_mensual.parquet — score mensual por punto
+  3. resumen_ejecutivo.parquet      — JOIN ranking x estacionalidad (W03)
+  4. artifacts/*.csv                — exports para consumo externo (W06B)
 """
 
 import duckdb
