@@ -5,7 +5,7 @@ import os
 
 # Configuración de rutas
 GOLD_RANKING = 'data/gold/ranking_puntos.parquet'
-MAPA_OUTPUT = 'data/gold/mapa_interactivo_cultivos.html'
+MAPA_OUTPUT = 'artifacts/mapa_interactivo_cultivos.html'
 
 def generar_mapa_desde_gold():
     # 1. Verificación de seguridad
