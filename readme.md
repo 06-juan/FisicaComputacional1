@@ -45,6 +45,10 @@ A. CREACIÓN DEL ARCHIVO .ENV:
    # Local Paths
    BRONZE_DATA_PATH=data/bronze/
 
+   TOKEN_FILE=token.json
+
+   CREDENTIALS_FILE=credentials.json
+
 B. NIVELES DE ACCESO:
    - GOOGLE EARTH ENGINE (GEE): 
      Necesario para el procesamiento satelital. Ejecuta en terminal:
